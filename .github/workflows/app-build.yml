@@ -1,0 +1,53 @@
+name: App Build
+on:
+  push:
+    paths:
+      - 'app/**'
+  pull_request:
+    paths:
+      - 'app/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: ./app
+        run: flutter pub get
+
+      - name: Decode signing keystore
+        if: secrets.ANDROID_SIGNING_KEY != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/keystore.jks
+          cat > android/local.properties <<EOF
+          storeFile=keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          EOF
+
+      - name: Build release APK
+        working-directory: ./app
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: medaix-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk

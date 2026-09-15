@@ -1,0 +1,38 @@
+name: API Deploy
+on:
+  push:
+    paths:
+      - 'api/**'
+  pull_request:
+    paths:
+      - 'api/**'
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        working-directory: ./api
+        run: pytest
+
+      - name: Deploy to Railway
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          pip install railway
+          railway deploy --token "$RAILWAY_TOKEN"
+        working-directory: ./api
