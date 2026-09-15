@@ -28,11 +28,8 @@ jobs:
         working-directory: ./api
         run: pytest
 
-      - name: Deploy to Railway
+      - name: Deploy to Render (free tier)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          pip install railway
-          railway deploy --token "$RAILWAY_TOKEN"
-        working-directory: ./api
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"

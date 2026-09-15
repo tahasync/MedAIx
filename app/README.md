@@ -20,7 +20,7 @@ The PRD / 32-week execution plan lives outside the repo at `D:\Fyp\MedAIx_32Week
 
 ## Stack
 
-Flutter + Riverpod · Material 3 Expressive "liquid glass" · FastAPI · SQLite → Postgres · Tesseract OCR · spaCy · Firebase Auth/FCM · Railway.
+Flutter + Riverpod · Material 3 Expressive "liquid glass" · FastAPI · SQLite → Postgres · Tesseract OCR · spaCy · Firebase Auth/FCM · Render (free tier).
 
 ## Getting started
 
