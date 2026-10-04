@@ -40,9 +40,19 @@ jobs:
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
+          # Fails the job on purpose. This step used to `exit 0` when the secret
+          # was absent, which made every push report success while deploying
+          # nothing — the single reason main stayed green for weeks without ever
+          # reaching Render. A red run here means "no deploy happened", which is
+          # the truth; a green one now guarantees the hook actually fired.
+          #
+          # Fix: Render dashboard -> medaix-api -> Settings -> Deploys ->
+          # "Deploy hook" (or the blue status-badge URL), then add it as the
+          # repository secret RENDER_DEPLOY_HOOK_URL.
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy."
-            exit 0
+            echo "::error::RENDER_DEPLOY_HOOK_URL is not set, so nothing was deployed."
+            echo "::error::Add the Render deploy hook as a repository secret to fix this."
+            exit 1
           fi
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
           echo "Deploy hook triggered."
