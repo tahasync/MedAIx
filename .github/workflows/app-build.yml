@@ -94,15 +94,27 @@ jobs:
       - name: Run tests
         run: flutter test
 
+      - name: Resolve build version
+        # Single source of truth is pubspec.yaml. Deriving the artifact name
+        # here keeps the upload, the verify step and the release in agreement,
+        # so a version bump can't leave a stale "medaix-release-apk" behind.
+        id: version
+        run: |
+          VERSION=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read version from pubspec.yaml"
+            exit 1
+          fi
+          # pubspec `name` is the Dart package (tahasync_medaix), not the brand,
+          # so the artifact name is built from the product name only.
+          # 0.1.0+1 -> v0.1.0-1; '+' is legal in filenames but reads badly.
+          SLUG=$(printf 'v%s' "$VERSION" | tr '+' '-')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "slug=MedAIx-$SLUG-release" >> "$GITHUB_OUTPUT"
+          echo "Building MedAIx v$VERSION"
+
       - name: Build release APK
         run: flutter build apk --release
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: medaix-release-apk
-          path: app/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
 
       - name: Verify APK identity and signing state
         run: |
@@ -116,6 +128,16 @@ jobs:
           # Fails if the APK fell back to debug signing.
           "$(dirname "$AAPT")/apksigner" verify --print-certs "$APK" \
             | grep -q 'Signer #1 certificate DN'
+          # Ship a properly named file rather than a bare app-release.apk.
+          mv "$APK" "${{ steps.version.outputs.slug }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.slug }}.apk
+          path: app/${{ steps.version.outputs.slug }}.apk
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Clean up signing material
         # Never leave key material in the workspace after the build.
