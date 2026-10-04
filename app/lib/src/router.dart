@@ -121,7 +121,8 @@ class _PlaceholderScreenState extends ConsumerState<PlaceholderScreen> {
   }
 }
 
-/// Pairs colour with an icon and text so status is never colour-only (§3b).
+/// Pairs colour with an icon and text so status is never colour-only, per the
+/// Color System's semantic-state rule.
 class _StatusBanner extends StatelessWidget {
   const _StatusBanner({
     required this.healthy,
