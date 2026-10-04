@@ -16,8 +16,8 @@ const String kApiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://localhost:8000',
 );
 
-/// Theme mode. Dark is the signature experience per §3b, but the system choice
-/// is honoured until Preferences lands in Sprint 13.
+/// Theme mode. Dark is the signature experience per the Color System, but the
+/// system choice is honoured until Preferences lands in Sprint 13.
 class ThemeModeController extends Notifier<ThemeMode> {
   @override
   ThemeMode build() => ThemeMode.system;

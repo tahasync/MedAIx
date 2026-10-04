@@ -1,4 +1,4 @@
-/// MedAIx theme — brand palette per AGENTS.md §3a.
+/// MedAIx theme — brand palette per the MedAIx Color System review.
 ///
 /// Five locked brand hexes (Ink / Navy / Steel / Slate / Mauve) drive both
 /// `ColorScheme`s. Each theme is authored independently rather than inverted,
@@ -226,7 +226,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      // §3b: dark is the signature experience — deep Ink background, never pure
+      // Color System: dark is the signature experience — deep Ink background, never
       // black; light stays calm and spacious — never pure white. `scheme.surface`
       // is the *elevated* tier (`#121526` in dark), not the page background.
       scaffoldBackgroundColor: isDark ? ink : scheme.surface,
