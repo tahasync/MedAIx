@@ -58,3 +58,8 @@ package.txt
 # ---- Icon generator scratch ----
 # `tool/out` holds design contact sheets from `tool/generate_icons.py --preview`.
 tool/out/
+.neon
+
+# ---- Neon CLI ----
+# .neon holds link state; .env.local is already covered by .env.*.
+node_modules/

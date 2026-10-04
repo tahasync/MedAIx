@@ -37,8 +37,29 @@ to point at Neon Postgres — use the **pooled** connection string (the one whos
 hostname contains `-pooler`) so a single Render dyno doesn't exhaust direct
 connections.
 
+`api/database.py` reads the URL in this order, first match wins:
+
+1. Real process environment (`DATABASE_URL`, then `NEON_DATABASE_URL`)
+2. `api/.env` (hand-written local settings)
+3. repo-root `.env.local` (where `neon link` / `neon env pull` write)
+4. `sqlite:///./medaix.db` — the last-resort fallback
+
 Store report images and medicine photos in Firebase Storage, not Postgres —
 Neon's free tier is 0.5 GB and structured rows are what belong there.
+
+### Which database is production actually using?
+
+```bash
+curl -s https://medaix.onrender.com/health
+```
+
+```json
+{"status": "ok", "database": "postgres"}
+```
+
+`database: "sqlite"` means the deployed service is writing to a throwaway disk.
+The value is derived from the configured URL and never opens a connection, so it
+stays cheap enough for the keep-alive ping to hit.
 
 ### ⚠️ SQLite on Render is ephemeral
 
@@ -46,11 +67,41 @@ Render gives every deploy a fresh disk, so a SQLite file is **deleted on each
 redeploy or restart**. At Week 0 only `/health` exists so nothing is actually
 lost, and `warn_if_ephemeral()` logs a warning at startup to make that visible.
 
-Do this before Sprint 12 or real rows will disappear:
+### Pointing production at Neon (required before real data lands)
 
-1. Create a Neon project and copy its **pooled** connection string.
-2. Add it to the Render service's environment as `NEON_DATABASE_URL`.
-3. Confirm the startup warning is gone — that confirms Postgres is in use.
+Production is **not** on Neon yet — it still runs on ephemeral SQLite. Both steps
+below are one-time dashboard configuration; neither can be done from the repo.
+
+**1. Add the connection string to the service**
+
+Render → `medaix-api` → **Environment** → *Add Environment Variable*:
+
+| Key | Value |
+| --- | --- |
+| `NEON_DATABASE_URL` | `postgresql://neondb_owner:<password>@ep-rough-heart-b3am3e5t-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` |
+
+Use the **pooled** host (`-pooler`), never the direct one. Save, then redeploy —
+Render only applies env changes on a new deploy.
+
+**2. Make pushes actually deploy**
+
+Every push to `main` currently reports success while deploying nothing, because
+`RENDER_DEPLOY_HOOK_URL` is unset and the deploy step skipped it. That step now
+**fails loudly** instead of skipping, so a green `API Deploy` run means a deploy
+actually happened.
+
+Copy the hook from Render → `medaix-api` → **Settings** → **Deploys** →
+*Deploy hook* (also shown as the URL behind the blue status badge), then:
+
+```bash
+gh secret set RENDER_DEPLOY_HOOK_URL --repo tahasync/MedAIx
+```
+
+Verify both landed:
+
+```bash
+curl -s https://medaix.onrender.com/health   # expect "database": "postgres"
+```
 
 ## Deploying to Render
 

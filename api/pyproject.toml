@@ -10,6 +10,11 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "pydantic>=2.9.0",
     "psycopg[binary]>=3.2.0",
+    # database.py imports dotenv directly, so it must be a direct dependency.
+    # It is only reachable today as a transitive extra of uvicorn[standard],
+    # which makes a `uv sync --frozen` deploy one uvicorn release away from an
+    # ImportError at startup.
+    "python-dotenv>=1.0.1",
 ]
 
 [dependency-groups]
