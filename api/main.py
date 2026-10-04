@@ -8,10 +8,11 @@ stay cheap and dependency-free.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import Base, engine
+from database import Base, engine, warn_if_ephemeral
 from models import Medicine, QRSession, Report, User, WellnessLog  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
+warn_if_ephemeral()
 
 app = FastAPI(
     title="MedAIx API",

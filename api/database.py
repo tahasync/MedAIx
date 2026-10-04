@@ -6,6 +6,7 @@ Postgres — the pooled ``-pooler`` host is preferred so a single Render dyno
 doesn't exhaust direct connections.
 """
 
+import logging
 import os
 
 from sqlalchemy import create_engine
@@ -37,3 +38,26 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def warn_if_ephemeral() -> None:
+    """Log loudly when running on a throwaway filesystem.
+
+    Render (and every container platform) gives each deploy a fresh,
+    ephemeral disk, so a SQLite file written there disappears on the next
+    redeploy. That is harmless while `/health` is the only route, but the
+    failure mode is silent: rows are written, reads succeed, and the data is
+    simply gone after a restart. Surfacing this at startup means the warning
+    is read long before someone loses a report to it.
+    """
+    if not SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        return
+
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "Using SQLite (%s) on what may be an ephemeral filesystem: "
+        "data will be LOST on the next deploy or restart. Set DATABASE_URL "
+        "(or NEON_DATABASE_URL on Render) to a pooled Postgres connection "
+        "string before storing real user data.",
+        SQLALCHEMY_DATABASE_URL,
+    )

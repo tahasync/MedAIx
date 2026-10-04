@@ -91,8 +91,9 @@ void main() {
     });
 
     // Driven by a fake clock rather than a real delay: the production timeout is
-    // a build-time --dart-define, so a wall-clock sleep would either be flaky or
-    // silently stop testing the deadline at all.
+    // a build-time --dart-define, and each attempt is retried, so a wall-clock
+    // sleep would be both flaky and slow. Elapsing past one attempt's deadline
+    // is enough to trip it; the fake clock makes the remaining two free.
     test('wraps an expired deadline (TimeoutException) in ApiException', () {
       final client = clientWith(MockClient((_) async {
         await Future<void>.delayed(const Duration(minutes: 5));
@@ -106,10 +107,50 @@ void main() {
         client.checkHealth().then((_) {}, onError: (Object e) {
           caught = e;
         });
-        async.elapse(const Duration(minutes: 1));
+        // 30s timeout + 2s retry gap, three times over, with slack.
+        async.elapse(const Duration(minutes: 5));
       });
 
       expect(caught, isA<ApiException>());
+    });
+
+    // Cold starts, not breakage: Render's edge answers 502/503 while a
+    // sleeping free instance boots. Retrying transparently is the difference
+    // between "it worked on the second try" and a false alarm.
+    test('recovers when an early attempt fails but the service wakes', () async {
+      var calls = 0;
+      final client = clientWith(MockClient((_) async {
+        calls++;
+        if (calls == 1) throw http.ClientException('Connection reset');
+        return http.Response('{"status":"ok"}', 200);
+      }));
+
+      expect(await client.checkHealth(), isTrue);
+      expect(calls, 2);
+    });
+
+    // A 4xx is a real answer, not a blip. Retrying it only delays the error.
+    test('does not retry a 4xx response', () async {
+      var calls = 0;
+      final client = clientWith(MockClient((_) async {
+        calls++;
+        return http.Response('nope', 404);
+      }));
+
+      await expectLater(client.checkHealth(), throwsA(isA<ApiException>()));
+      expect(calls, 1);
+    });
+
+    // Every attempt failing must still surface, not loop forever.
+    test('gives up after the configured number of attempts', () async {
+      var calls = 0;
+      final client = clientWith(MockClient((_) async {
+        calls++;
+        throw http.ClientException('Connection refused');
+      }));
+
+      await expectLater(client.checkHealth(), throwsA(isA<ApiException>()));
+      expect(calls, 3);
     });
 
     // ApiException raised for a non-200 must not be re-wrapped, or callers
