@@ -111,6 +111,9 @@ GitHub delays scheduled runs under load — so pair it with an external monitor:
 Leave the default alert contacts. Once added, Render stays "Live" rather than
 cycling to "Suspended".
 
+✅ **Configured** — an HTTP(s) monitor on `https://medaix.onrender.com/health`
+at 5-minute intervals, alongside the GitHub cron. Both currently report up.
+
 > Ping a real app route, never `/robots.txt` — Render answers that path itself
 > even while spun down, so it never reaches the app and never resets the idle
 > timer.

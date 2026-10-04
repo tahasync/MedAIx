@@ -1,11 +1,10 @@
 # MedAIx — 32-Week Solo Execution Plan (Muhammad Taha Naeem)
 
 > **Status:** Week 0 setup is complete — production runs on Neon Postgres, both
-> workflows deploy green. The canonical visual spec is
-> [`color-system.md`](color-system.md), which replaces the deleted `AGENTS.md`.
-> Next up: **Sprint 1**. Two Week 0 items remain open — an external uptime
-> monitor as backup for the GitHub cron, and confirming the service stays "Live"
-> rather than cycling to "Suspended".
+> workflows deploy green, and uptime is monitored by both `keep-alive.yml` (10-min
+> cron) and UptimeRobot (5-min interval, 100% uptime, 0 incidents). The canonical
+> visual spec is [`color-system.md`](color-system.md), which replaces the deleted
+> `AGENTS.md`. Next up: **Sprint 1**.
 
 Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod + Firebase, GitHub Actions CI/CD, spec-first + OpenCode CLI build pattern. No group dependency — every sprint is sequenced so one person can execute it. **Zero-cost stack:** Render's free web service for backend hosting + Neon's free Postgres tier for the database — no Railway, no paid infra anywhere.
 
@@ -55,7 +54,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 - Flutter skeleton: Riverpod providers structure, routing, theme — reuse Foam Shop's CI/CD and Firebase setup *structure*, but the visual language is MedAIx's own: brand palette Ink `#0E0D15` / Navy `#182346` / Steel `#3D5387` / Slate `#7C83AD` / Mauve `#BFA9BA`, full light/dark `ColorScheme` + separate error/warning/success semantic colors, styled per the premium glass/atmospheric direction (selective glass + subtle elevation, not the old flat no-elevation look) — spec lives in [`color-system.md`](color-system.md). Nothing's built yet, so this is the starting theme, not a migration.
 - GitHub Actions: copy foam-shop-erp's APK build workflow, retarget to medaix-app repo.
 - Render web service created for `medaix-api` (free tier); Neon project created for the Postgres DB; confirm `api-deploy.yml` pushes a "hello world" `/health` endpoint live before building real features.
-- Set up `keep-alive.yml` (10-min cron pinging `/health`) and, as a backup since GitHub's scheduled crons can be delayed under load, a free UptimeRobot or cron-job.org monitor hitting the same URL every 5 minutes — verify in the Render dashboard that the service actually stays "Live" instead of cycling to "Suspended" over a few idle hours before you trust it.
+- Set up `keep-alive.yml` (10-min cron pinging `/health`) and, as a backup since GitHub's scheduled crons can be delayed under load, a free UptimeRobot or cron-job.org monitor hitting the same URL every 5 minutes — verify in the Render dashboard that the service actually stays "Live" instead of cycling to "Suspended" over a few idle hours before you trust it. ✅ **Done** — `keep-alive.yml` on the 10-min cron plus a UptimeRobot HTTP(s) monitor on `https://medaix.onrender.com/health` at 5-minute intervals. Both report the service up; UptimeRobot shows 100% uptime and 0 incidents.
 
 ### Sprint 1 (Wk 1–2) — Report Upload + OCR (EP-01, PB-01, US-01)
 - Backend: Tesseract OCR integration, `/upload-report` endpoint, image/PDF preprocessing.
