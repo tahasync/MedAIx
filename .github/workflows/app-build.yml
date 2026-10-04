@@ -106,13 +106,18 @@ jobs:
 
       - name: Verify APK identity and signing state
         run: |
+          # This job defaults to working-directory ./app, so the artifact is
+          # relative to app/. `uses:` steps ignore that default, hence their
+          # paths stay repo-root relative.
+          APK=build/app/outputs/flutter-apk/app-release.apk
           AAPT="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
-          "$AAPT" dump packagename \
-            app/build/app/outputs/flutter-apk/app-release.apk \
-            | tee package.txt
+          "$AAPT" dump packagename "$APK" | tee package.txt
           grep -qx 'com.tahasync.medaix' package.txt
+          # Fails if the APK fell back to debug signing.
+          "$(dirname "$AAPT")/apksigner" verify --print-certs "$APK" \
+            | grep -q 'Signer #1 certificate DN'
 
       - name: Clean up signing material
         # Never leave key material in the workspace after the build.
         if: always()
-        run: rm -f app/android/key.properties app/android/app/keystore.jks
+        run: rm -f android/key.properties android/app/keystore.jks
