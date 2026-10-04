@@ -122,12 +122,34 @@ jobs:
           # relative to app/. `uses:` steps ignore that default, hence their
           # paths stay repo-root relative.
           APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK" || { echo "::error::APK not found at $APK"; exit 1; }
+
           AAPT="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
           "$AAPT" dump packagename "$APK" | tee package.txt
           grep -qx 'com.tahasync.medaix' package.txt
+
+          # Prefer the apksigner on PATH, else scan build-tools directly:
+          # the newest build-tools dir can be a preview channel without one.
+          APKSIGNER="$(command -v apksigner || true)"
+          if [ -z "$APKSIGNER" ]; then
+            for dir in "$ANDROID_HOME"/build-tools/*/; do
+              if [ -x "${dir}apksigner" ]; then APKSIGNER="${dir}apksigner"; fi
+            done
+          fi
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found; cannot verify release signing"
+            exit 1
+          fi
+
+          # Print the certs so a future signing failure is diagnosable from
+          # the log instead of a bare non-zero exit.
+          if ! "$APKSIGNER" verify --print-certs "$APK"; then
+            echo "::error::apksigner could not verify $APK"
+            exit 1
+          fi
           # Fails if the APK fell back to debug signing.
-          "$(dirname "$AAPT")/apksigner" verify --print-certs "$APK" \
-            | grep -q 'Signer #1 certificate DN'
+          "$APKSIGNER" verify --print-certs "$APK" | grep -q 'certificate DN'
+
           # Ship a properly named file rather than a bare app-release.apk.
           mv "$APK" "${{ steps.version.outputs.slug }}.apk"
 
