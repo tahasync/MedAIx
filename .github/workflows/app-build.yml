@@ -1,15 +1,27 @@
 name: App Build
+
 on:
   push:
     paths:
       - 'app/**'
+      - '.github/workflows/app-build.yml'
   pull_request:
     paths:
       - 'app/**'
+      - '.github/workflows/app-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: app-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./app
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,30 +36,83 @@ jobs:
         with:
           flutter-version: '3.44.9'
           channel: stable
+          cache: true
 
       - name: Install dependencies
-        working-directory: ./app
         run: flutter pub get
 
-      - name: Decode signing keystore
-        if: secrets.ANDROID_SIGNING_KEY != ''
+      - name: Resolve signing availability
+        # Secrets are not exposed to `if:` expressions, so probe through env.
+        id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > android/keystore.jks
-          cat > android/local.properties <<EOF
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] \
+             && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail fast when release signing is required
+        # Guards the main branch: shipping a debug-signed artifact to users
+        # under the MedAIx name is worse than failing the build.
+        if: >-
+          steps.signing.outputs.available != 'true'
+          && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+        run: |
+          echo "::error::Release signing secrets are not configured. Set"
+          echo "::error::ANDROID_SIGNING_KEY, ANDROID_KEYSTORE_PASSWORD,"
+          echo "::error::ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+          exit 1
+
+      - name: Decode signing keystore
+        # Keystore lands in android/app/ because storeFile is resolved relative
+        # to the Gradle module directory, not android/ (rootProject).
+        if: steps.signing.outputs.available == 'true'
+        working-directory: ./app
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
+          cat > android/key.properties <<EOF
           storeFile=keystore.jks
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
           EOF
 
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
       - name: Build release APK
-        working-directory: ./app
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: medaix-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Verify APK identity and signing state
+        run: |
+          AAPT="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
+          "$AAPT" dump packagename \
+            app/build/app/outputs/flutter-apk/app-release.apk \
+            | tee package.txt
+          grep -qx 'com.tahasync.medaix' package.txt
+
+      - name: Clean up signing material
+        # Never leave key material in the workspace after the build.
+        if: always()
+        run: rm -f app/android/key.properties app/android/app/keystore.jks

@@ -1,7 +1,56 @@
-# OS / editor
-.DS_Store
-Thumbs.db
-*.log
-*.swp
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Python / uv ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# ---- Local DB ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Flutter / Dart ----
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/coverage/
+
+# ---- IDE ----
 .idea/
 .vscode/
+*.iml
+*.ipr
+*.iws
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Secrets / keys ----
+*.jks
+*.keystore
+*.p12
+*.pem
+app/android/key.properties
+app/android/app/keystore.jks
+
+# ---- Local logs & verification artifacts ----
+# Written by local dev/test shells; never part of the repo.
+server.log
+*.log
+app/*.log
+app/shot_*.png
+package.txt

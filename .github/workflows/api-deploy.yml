@@ -1,35 +1,48 @@
 name: API Deploy
+
 on:
   push:
     paths:
       - 'api/**'
+      - '.github/workflows/api-deploy.yml'
   pull_request:
     paths:
       - 'api/**'
+      - '.github/workflows/api-deploy.yml'
+
+concurrency:
+  group: api-deploy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.12'
+          enable-cache: true
 
       - name: Install dependencies
-        working-directory: ./api
-        run: |
-          pip install -r requirements.txt
-          pip install pytest
+        run: uv sync --frozen --dev
 
       - name: Run tests
-        working-directory: ./api
-        run: pytest
+        run: uv run pytest -v
 
       - name: Deploy to Render (free tier)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy."
+            exit 0
+          fi
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Deploy hook triggered."

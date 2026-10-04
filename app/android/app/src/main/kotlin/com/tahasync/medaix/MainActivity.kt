@@ -1,4 +1,4 @@
-package com.medaix.app
+package com.tahasync.medaix
 
 import io.flutter.embedding.android.FlutterActivity
 

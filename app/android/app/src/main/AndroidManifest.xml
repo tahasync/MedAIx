@@ -1,8 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required in all build variants: the app calls the MedAIx API. The
+         debug manifest also declares this, but debug-only is not enough. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="MedAIx"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"
