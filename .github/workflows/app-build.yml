@@ -113,8 +113,28 @@ jobs:
           echo "slug=MedAIx-$SLUG-release" >> "$GITHUB_OUTPUT"
           echo "Building MedAIx v$VERSION"
 
+      - name: Resolve API base URL
+        # Injected at compile time: providers.dart reads API_BASE_URL via
+        # String.fromEnvironment. Failing here is much better than shipping an
+        # APK whose default base URL is http://localhost:8000.
+        id: api
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "::error::API_BASE_URL repository variable is not set. Set it to"
+            echo "::error::your Render URL, e.g. https://medaix-api.onrender.com"
+            exit 1
+          fi
+          echo "base_url=$API_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "Building against $API_BASE_URL"
+
       - name: Build release APK
-        run: flutter build apk --release
+        # GITHUB_OUTPUT is line-delimited KEY=value; expanding it unquoted splits
+        # the value on whitespace so URLs survive intact.
+        run: |
+          flutter build apk --release \
+            --dart-define=API_BASE_URL=${{ steps.api.outputs.base_url }}
 
       - name: Verify APK identity and signing state
         run: |
