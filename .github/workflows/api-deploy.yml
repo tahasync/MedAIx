@@ -9,6 +9,11 @@ on:
     paths:
       - 'api/**'
       - '.github/workflows/api-deploy.yml'
+  # Manual trigger for the case the path filter cannot cover: a commit that
+  # touches nothing under api/ (a .gitignore or docs edit) produces no run at
+  # all, which is indistinguishable from CI being broken. This lets you verify
+  # tests and the deploy hook on demand without making routine pushes deploy.
+  workflow_dispatch:
 
 concurrency:
   group: api-deploy-${{ github.ref }}
