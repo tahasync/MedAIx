@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_medaix.db")
 
+import database
 from main import app  # noqa: E402
 
 
@@ -32,3 +33,30 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "paths" in response.json()
+
+
+def test_sqlite_on_disk_triggers_ephemeral_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A SQLite URL must warn, since Render's disk is wiped on every deploy."""
+    with caplog.at_level("WARNING"):
+        database.warn_if_ephemeral()
+
+    assert any("ephemeral" in record.message for record in caplog.records)
+
+
+def test_postgres_url_does_not_warn(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Once Neon is configured the warning is noise, so it must stay silent."""
+    monkeypatch.setattr(
+        database,
+        "SQLALCHEMY_DATABASE_URL",
+        "postgresql://user:pw@ep-x-pooler.aws.neon.tech/medaix",
+    )
+
+    with caplog.at_level("WARNING"):
+        database.warn_if_ephemeral()
+
+    assert not any("ephemeral" in record.message for record in caplog.records)
