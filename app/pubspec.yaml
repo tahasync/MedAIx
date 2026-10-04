@@ -16,6 +16,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Fake clock for the ApiClient deadline test, so it exercises the timeout
+  # without a real sleep. Transitive via flutter_test, declared for direct use.
+  fake_async: ^1.3.3
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/logo.png
+    - assets/wordmark.png

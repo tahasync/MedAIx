@@ -33,10 +33,22 @@ class ApiClient {
 
   /// Timeout for a connectivity probe.
   ///
-  /// Deliberately short: this is a liveness check surfaced directly to the
-  /// user, so a hung network must surface as an Error state quickly rather
-  /// than leaving a spinner running for the full request budget.
-  static const Duration _healthTimeout = Duration(seconds: 10);
+  /// Overridable at build time:
+  /// `flutter run --dart-define=API_HEALTH_TIMEOUT=30`
+  ///
+  /// The default is 30s rather than a tight budget because the API may be
+  /// hosted on Render's free tier, which spins the instance down after ~15
+  /// idle minutes. The first request after a wake has to boot Python and load
+  /// FastAPI before it can answer, and a short timeout would report that
+  /// perfectly healthy backend as unreachable. This is still bounded: a dead
+  /// host fails fast on connection refused, and this deadline only governs how
+  /// long we wait on a *slow* one.
+  static const Duration _healthTimeout = Duration(
+    seconds: int.fromEnvironment(
+      'API_HEALTH_TIMEOUT',
+      defaultValue: 30,
+    ),
+  );
 
   /// `GET /health`. Returns true when the API answers `{"status":"ok"}`.
   ///

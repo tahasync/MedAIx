@@ -54,3 +54,7 @@ server.log
 app/*.log
 app/shot_*.png
 package.txt
+
+# ---- Icon generator scratch ----
+# `tool/out` holds design contact sheets from `tool/generate_icons.py --preview`.
+tool/out/

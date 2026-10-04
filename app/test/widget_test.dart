@@ -1,3 +1,4 @@
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -89,13 +90,26 @@ void main() {
       );
     });
 
-    test('wraps an expired deadline (TimeoutException) in ApiException', () async {
+    // Driven by a fake clock rather than a real delay: the production timeout is
+    // a build-time --dart-define, so a wall-clock sleep would either be flaky or
+    // silently stop testing the deadline at all.
+    test('wraps an expired deadline (TimeoutException) in ApiException', () {
       final client = clientWith(MockClient((_) async {
-        await Future<void>.delayed(const Duration(seconds: 30));
+        await Future<void>.delayed(const Duration(minutes: 5));
         return http.Response('{"status":"ok"}', 200);
       }));
 
-      expect(client.checkHealth(), throwsA(isA<ApiException>()));
+      Object? caught;
+      fakeAsync((async) {
+        // Block-bodied onError: an expression body would return the
+        // assignment's value, which is not the Future<bool>'s type.
+        client.checkHealth().then((_) {}, onError: (Object e) {
+          caught = e;
+        });
+        async.elapse(const Duration(minutes: 1));
+      });
+
+      expect(caught, isA<ApiException>());
     });
 
     // ApiException raised for a non-200 must not be re-wrapped, or callers
