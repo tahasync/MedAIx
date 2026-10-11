@@ -134,7 +134,15 @@ def _report_font(size: int):
             return ImageFont.truetype(candidate, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    try:
+        # Pillow >= 10.1 renders a crisp scalable font at the requested size.
+        # The CI runner has none of the Windows fonts above, and the bare
+        # load_default() bitmap fallback ignored `size`, producing tiny blocky
+        # glyphs that Tesseract misread ("Haemoglobin" -> "Haemeglobin"), which
+        # failed the deploy workflow's test step. Scaling the default font fixes it.
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1 has no scalable default.
+        return ImageFont.load_default()
 
 
 def test_upload_report_extracts_and_stores_text(client: TestClient) -> None:
