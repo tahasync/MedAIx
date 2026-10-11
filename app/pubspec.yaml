@@ -11,7 +11,11 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^2.6.1
   http: ^1.2.2
-
+  # File selection and camera capture for Sprint 1 OCR.
+  # Pinned to >=13 because 8.x's Android module compiles against API 34 and
+  # pulls a plugin lifecycle dependency that requires 36, failing the build.
+  file_picker: ^13.1.0
+  image_picker: ^1.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

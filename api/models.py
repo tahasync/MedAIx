@@ -46,13 +46,17 @@ class Report(Base):
     __tablename__ = "reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Nullable until Firebase Auth lands in Sprint 2. Sprint 1 has no sign-in,
+    # so an upload cannot be attributed to a user yet; reports are stored
+    # unclaimed and re-linked once `users.firebase_uid` exists. Every other
+    # table keeps a required user_id because nothing writes to it before auth.
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     image_path = Column(String, nullable=True)
     original_text = Column(Text, nullable=True)
     simplified_text = Column(Text, nullable=True)
     ocr_confidence = Column(Float, nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
-    processed_at = Column(DateTime, nullable=True)
+    processed_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="reports")
 

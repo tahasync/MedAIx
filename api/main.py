@@ -1,23 +1,43 @@
-"""MedAIx API entrypoint (Week 0 scaffold).
+"""MedAIx API entrypoint.
 
-Only the health route exists at this stage — feature endpoints land in their
-own sprint. `/health` is also the route the keep-alive ping hits, so it must
-stay cheap and dependency-free.
+`/health` is the route the keep-alive ping hits, so it must stay cheap and
+dependency-free. Feature endpoints land in their own sprint — Sprint 1 adds
+`/upload-report`.
 """
 
-from fastapi import FastAPI
+import io
+import logging
+from typing import Annotated
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image, UnidentifiedImageError
+from pypdf import PdfReader
 
 from database import (
     SQLALCHEMY_DATABASE_URL,
     Base,
+    SessionLocal,
     engine,
     warn_if_ephemeral,
 )
 from models import Medicine, QRSession, Report, User, WellnessLog  # noqa: F401
+from ocr import OcrLanguage, OcrResult, OcrUnavailableError, extract_text
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 warn_if_ephemeral()
+
+# 12 MB. A 12MP phone photo is ~4 MB as JPEG; PDFs of lab reports sit well under
+# this. The cap exists so one upload cannot exhaust the free tier's memory —
+# Render gives a free instance roughly 512 MB.
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+
+# Below this, Tesseract finds nothing worth storing. Surfacing it as a 422 lets
+# the client show "we couldn't read that" instead of saving an empty report the
+# user then has to recognise as useless.
+MIN_CONFIDENCE = 30.0
 
 app = FastAPI(
     title="MedAIx API",
@@ -53,4 +73,127 @@ def health() -> dict[str, str]:
         "database": (
             "sqlite" if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else "postgres"
         ),
+    }
+
+
+def _first_page_image(payload: bytes) -> Image.Image:
+    """Decode an uploaded image, or page 1 of a PDF, into a PIL image.
+
+    PDFs go through their first page only. Tesseract reads images, not PDF
+    text layers, and a scanned lab report has no text layer at all — so
+    extracting text with pypdf would return nothing on exactly the documents
+    this feature exists for. Rendering page 1 keeps both scanned and digital
+    PDFs on the same code path.
+    """
+    if payload[:5] == b"%PDF-":
+        try:
+            reader = PdfReader(io.BytesIO(payload))
+            if not reader.pages:
+                raise HTTPException(
+                    status_code=422,
+                    detail="That PDF has no pages to read.",
+                )
+            # pypdf can rasterise only when an extra backend is present; fall
+            # back to telling the user rather than raising a stack trace.
+            for page in reader.pages[:1]:
+                images = getattr(page, "images", None)
+                if images:
+                    return Image.open(io.BytesIO(images[0].data)).convert("RGB")
+            raise HTTPException(
+                status_code=422,
+                detail="That PDF has no embedded image to read. "
+                "Try uploading a photo of the report instead.",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 - never leak parser internals
+            logger.warning("PDF decode failed: %s", exc)
+            raise HTTPException(
+                status_code=422,
+                detail="That PDF could not be read. "
+                "Try uploading a photo of the report instead.",
+            ) from exc
+
+    try:
+        image = Image.open(io.BytesIO(payload))
+        image.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(
+            status_code=415,
+            detail="That file is not a readable image. "
+            "Upload a JPEG, PNG, or PDF of your report.",
+        ) from exc
+
+    return image.convert("RGB")
+
+
+@app.post("/upload-report")
+async def upload_report(
+    file: Annotated[UploadFile, File(description="Lab report image or PDF")],
+    language: Annotated[
+        OcrLanguage,
+        Form(description="OCR mode: English, Urdu script, or Roman Urdu"),
+    ] = OcrLanguage.ENGLISH,
+) -> dict[str, object]:
+    """Accept a lab report, extract its text, and store the raw OCR result.
+
+    Returns the stored report id and a confidence figure. Simplification into
+    plain language is Sprint 2 (`/simplify-report`); Sprint 1 deliberately stops
+    at raw extraction so the two can be measured separately.
+    """
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(
+            status_code=422,
+            detail="That file was empty. Please choose a report to upload.",
+        )
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="That file is larger than 12 MB. "
+            "Try a photo instead of a high-resolution scan.",
+        )
+
+    image = _first_page_image(payload)
+
+    try:
+        result: OcrResult = extract_text(image, language=language)
+    except OcrUnavailableError as exc:
+        # 503, not 500: the request was fine, the server is not ready.
+        logger.error("OCR unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Report scanning is temporarily unavailable: {exc} "
+            "Your file has not been lost.",
+        ) from exc
+
+    if not result.text or result.confidence < MIN_CONFIDENCE:
+        raise HTTPException(
+            status_code=422,
+            detail="We could not read any text from that report. "
+            "Try a clearer photo, with the whole page visible and good lighting.",
+        )
+
+    report = Report(
+        original_text=result.text,
+        ocr_confidence=result.confidence,
+        image_path=file.filename,
+    )
+    session = SessionLocal()
+    try:
+        session.add(report)
+        session.commit()
+        session.refresh(report)
+        report_id = report.id
+    finally:
+        session.close()
+
+    return {
+        "id": report_id,
+        "text": result.text,
+        "language": language.value,
+        "confidence": result.confidence,
+        "width": result.width,
+        "height": result.height,
+        "skew_corrected_degrees": result.skew_degrees,
     }
