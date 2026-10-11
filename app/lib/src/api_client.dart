@@ -69,6 +69,22 @@ class ApiClient {
   static bool _isRetryableStatus(int? statusCode) =>
       statusCode == null || statusCode >= 500;
 
+  /// Total attempts for `/upload-report`, delay between them.
+  ///
+  /// Mirrors [_healthAttempts]/[_retryDelay] so the report flow survives a cold
+  /// Render instance the same way the connectivity probe does. Without this,
+  /// the very first upload after the free-tier instance sleeps hits the edge's
+  /// bare 502/503 (no FastAPI body) and fails permanently until the user taps
+  /// "Try again" by hand — which they cannot distinguish from a broken deploy.
+  ///
+  /// Retrying a POST is safe here: that edge 5xx is returned *before* the
+  /// endpoint runs, so a retry cannot create a duplicate report.
+  static const int _uploadAttempts = int.fromEnvironment(
+    'API_UPLOAD_ATTEMPTS',
+    defaultValue: 3,
+  );
+  static const Duration _uploadRetryDelay = Duration(seconds: 3);
+
   /// `GET /health`. Returns true when the API answers `{"status":"ok"}`.
   ///
   /// Retries a transient failure (timeout, connection reset, 5xx) up to
@@ -151,6 +167,29 @@ class ApiClient {
     String filePath, {
     String language = 'english',
     Duration timeout = const Duration(seconds: 90),
+  }) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await _attemptUpload(
+          filePath,
+          language: language,
+          timeout: timeout,
+        );
+      } on ApiException catch (error) {
+        final isLast = attempt >= _uploadAttempts;
+        if (isLast || !_isRetryableStatus(error.statusCode)) rethrow;
+        await Future<void>.delayed(_uploadRetryDelay);
+      }
+    }
+  }
+
+  /// One upload attempt. A [http.MultipartRequest] body is a single-use
+  /// stream, so this rebuilds the request (and re-reads the file) on every
+  /// call — the retry loop in [uploadReport] cannot reuse the same object.
+  Future<OcrUploadResult> _attemptUpload(
+    String filePath, {
+    required String language,
+    required Duration timeout,
   }) async {
     final request = http.MultipartRequest(
       'POST',

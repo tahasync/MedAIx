@@ -15,14 +15,18 @@ Preprocessing order matters and is not arbitrary:
    This uses the projection-profile method: rotate, measure how peaked the
    horizontal ink histogram is, and keep the angle that maximises it. Sampling
    at 0.5 degree steps keeps it fast enough to run per-request.
-4. **Upscale small images.** Tesseract wants roughly 300 DPI; anything narrower
-   than ~1500px on the long edge loses small print.
+4. **Resize to Tesseract's efficient range.** Tesseract's accuracy plateaus at
+   roughly 300 DPI, so the long edge is clamped to [_MIN_LONG_EDGE, _MAX_LONG_EDGE]:
+   small images are upscaled (narrower than ~1500px loses small print) and large
+   ones are downscaled (past ~3000px only adds runtime and memory — both scarce
+   on the free tier — with no accuracy gain).
 """
 
 import logging
 import os
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -46,10 +50,30 @@ if _LOCAL_TESSDATA.is_dir():
 # Below this the print is too small for Tesseract to segment reliably.
 _MIN_LONG_EDGE = 1500
 
+# Ceiling for the long edge before OCR. ~300 DPI for a page is where Tesseract's
+# accuracy plateaus; beyond that, extra pixels only add time and memory — both
+# scarce on Render's ~512 MB free tier. 3000px is roughly 300 DPI on a portrait
+# page and twice the floor above, so small print still survives while a 12 MP
+# phone photo (~4000px long edge) is reined in instead of being fed straight to
+# the OCR engine at full resolution.
+_MAX_LONG_EDGE = 3000
+
+# Deskew searches a downscaled probe, not the full image. The projection
+# profile's peak angle is scale-invariant, but every candidate rotation costs
+# O(pixels), so probing at ~1000px on the long edge removes the dominant cost of
+# this pipeline while still resolving sub-degree skew. The correction itself is
+# applied to the full-resolution image.
+_DESKEW_PROBE_LONG_EDGE = 1000
+
 # Deskew search range. Real photos sit within a few degrees of level; widening
 # this costs time and risks "correcting" a genuinely rotated document.
 _MAX_SKEW_DEGREES = 7.0
 _SKEW_STEP = 0.5
+
+# Set once the Tesseract binary has answered a version probe. The binary's
+# presence does not change while the server runs, so this latches the one
+# successful check and removes a subprocess spawn from every later upload.
+_TESSERACT_READY = False
 
 
 class OcrUnavailableError(RuntimeError):
@@ -137,20 +161,41 @@ def _projection_sharpness(array: np.ndarray) -> float:
     return float(np.square(row_sums).sum())
 
 
+def _deskew_probe(image: Image.Image) -> Image.Image:
+    """Downscale a copy for the deskew search without changing the angle.
+
+    The projection profile's peak angle is the same at any scale, but each
+    candidate rotation costs O(pixels). Probing a ~1000px-long-edge copy keeps
+    the search cheap on full-resolution phone photos; [_deskew] applies the
+    winning angle to the original, full-resolution image.
+    """
+    long_edge = max(image.size)
+    if long_edge <= _DESKEW_PROBE_LONG_EDGE:
+        return image
+    scale = _DESKEW_PROBE_LONG_EDGE / long_edge
+    return image.resize(
+        (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+        Image.BILINEAR,
+    )
+
+
 def _deskew(image: Image.Image) -> tuple[Image.Image, float]:
     """Rotate to level using the projection-profile method.
 
     Returns the rotated image and the angle applied. Falls back to the original
     image if the array maths fails, since a slightly skewed read beats no read.
     """
+    probe = _deskew_probe(image)
     try:
-        grayscale = np.asarray(image.convert("L"), dtype=np.float64)
+        grayscale = np.asarray(probe, dtype=np.uint8)
     except (ValueError, OSError):
         return image, 0.0
 
-    # Rotation is O(width x height) per candidate angle. Rotating the array by
-    # -angle rather than rebuilding the image each time keeps this cheap enough
-    # to sit in a request path.
+    # Rotation is O(width x height) per candidate angle, and it runs once per
+    # step across the whole search. Probing the downscaled copy from
+    # [_deskew_probe] is what keeps that affordable on full-resolution photos;
+    # rotating the array by -angle (rather than rebuilding the image) avoids a
+    # second resize per step.
     best_angle = 0.0
     best_score = _projection_sharpness(grayscale)
     if best_score == 0.0:
@@ -182,15 +227,33 @@ def preprocess(source: Image.Image) -> tuple[Image.Image, float]:
     grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
     levelled, skew = _deskew(grayscale)
 
-    long_edge = max(levelled.size)
-    if long_edge < _MIN_LONG_EDGE:
-        scale = _MIN_LONG_EDGE / long_edge
-        levelled = levelled.resize(
-            (int(levelled.width * scale), int(levelled.height * scale)),
-            Image.LANCZOS,
-        )
+    return _resize_to_bounds(levelled), skew
 
-    return levelled, skew
+
+def _resize_to_bounds(image: Image.Image) -> Image.Image:
+    """Scale the long edge into Tesseract's efficient range before OCR.
+
+    Two bounds, applied to the same axis so aspect ratio is preserved:
+
+    * Up to :data:`_MIN_LONG_EDGE` when small — Tesseract loses fine print below
+      roughly 300 DPI.
+    * Down to :data:`_MAX_LONG_EDGE` when large — Tesseract's runtime and memory
+      both grow with pixel count, and a 12 MP phone photo (~4000px) costs the
+      free tier dearly for no accuracy gain past ~300 DPI.
+
+    Within the range the image is returned untouched, so an already-well-sized
+    scan is never needlessly resampled.
+    """
+    long_edge = max(image.size)
+    if _MIN_LONG_EDGE <= long_edge <= _MAX_LONG_EDGE:
+        return image
+
+    target = min(max(long_edge, _MIN_LONG_EDGE), _MAX_LONG_EDGE)
+    scale = target / long_edge
+    return image.resize(
+        (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+        Image.LANCZOS,
+    )
 
 
 def extract_text(
@@ -208,10 +271,7 @@ def extract_text(
     prepared, skew = preprocess(image)
     tesseract_language = _TESSERACT_LANGUAGES[language]
     required_languages = set(tesseract_language.split("+"))
-    try:
-        installed_languages = set(pytesseract.get_languages(config=""))
-    except pytesseract.TesseractNotFoundError as exc:
-        raise OcrUnavailableError("Tesseract is not installed.") from exc
+    installed_languages = _installed_languages()
     missing_languages = required_languages - installed_languages
     if missing_languages:
         missing = ", ".join(sorted(missing_languages))
@@ -247,7 +307,26 @@ def extract_text(
         skew_degrees=round(skew, 2),
     )
 
+@lru_cache(maxsize=1)
+def _installed_languages() -> frozenset[str]:
+    """Installed Tesseract traineddata codes, cached for the process lifetime.
+
+    ``pytesseract.get_languages`` shells out to ``tesseract --list-langs``; the
+    set of traineddata files does not change while the server runs, so probing
+    it once and caching removes a subprocess spawn from every upload. A missing
+    binary raises (and lru_cache does not cache exceptions), so a broken install
+    keeps failing loudly rather than being frozen as an empty set.
+    """
+    try:
+        return frozenset(pytesseract.get_languages(config=""))
+    except pytesseract.TesseractNotFoundError as exc:
+        raise OcrUnavailableError("Tesseract is not installed.") from exc
+
+
 def _ensure_binary() -> None:
+    global _TESSERACT_READY
+    if _TESSERACT_READY:
+        return
     try:
         pytesseract.get_tesseract_version()
     except pytesseract.TesseractNotFoundError:
@@ -259,3 +338,8 @@ def _ensure_binary() -> None:
                 "Tesseract is not installed. Install it with "
                 "`winget install UB-Mannheim.TesseractOCR`."
             ) from exc
+    else:
+        # Latch success only. A failure leaves the flag false so the next call
+        # re-probes: a binary installed mid-session is picked up, and a broken
+        # one keeps failing instead of being frozen as ready.
+        _TESSERACT_READY = True
