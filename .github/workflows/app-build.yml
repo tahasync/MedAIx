@@ -181,6 +181,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Attach APK to GitHub Release
+        # Branch and PR builds publish a run artifact only. When the build is
+        # triggered by a tag push, also publish the APK as a release asset so it
+        # appears under Releases, not just on the Actions run. Creates the
+        # release if the tag has none yet; an existing release just gains the
+        # asset. Guarded by the tag ref so main/PR builds never open a release.
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: app/${{ steps.version.outputs.slug }}.apk
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Clean up signing material
         # Never leave key material in the workspace after the build.
         if: always()
