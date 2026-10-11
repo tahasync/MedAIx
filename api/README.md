@@ -1,6 +1,7 @@
 # MedAIx API
 
-FastAPI backend for MedAIx. Week 0 scaffold — currently just `/health`.
+FastAPI backend for MedAIx. Sprint 1 includes `/health` and `/upload-report`
+with English, Urdu-script, and Roman Urdu OCR modes.
 
 ## Requirements
 
@@ -14,6 +15,33 @@ manual `venv` — dependencies are declared in `pyproject.toml` and locked in
 cd api
 uv sync --dev
 ```
+
+### OCR language data
+
+Sprint 1 supports three upload modes: English (`eng`), Urdu script (`urd+eng`),
+and Roman Urdu (`eng`, because it uses Latin letters). `pytesseract` is only a
+Python wrapper; the Tesseract executable and traineddata files must also be
+installed. The API checks the selected language data and returns a setup error
+instead of failing the upload with an internal server error.
+
+On Ubuntu/Debian, install both language packs with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-urd
+```
+
+On Windows, install Tesseract, then run this from the `api` directory:
+
+```powershell
+.\setup_ocr_languages.ps1
+```
+
+The script copies the existing English model and downloads the Urdu model into
+an ignored project-local `.tessdata` directory, so it does not need to write to
+`Program Files`. English and Roman Urdu continue to use the English model.
+For the existing Render service, set its Build Command to the value shown in
+the deployment table below so the hosted instance installs both models too.
 
 ## Run
 
@@ -110,7 +138,7 @@ Configured and live at <https://medaix.onrender.com>.
 | Setting | Value |
 | --- | --- |
 | Root Directory | `api` |
-| Build Command | `uv sync --frozen --no-dev` |
+| Build Command | `apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-urd && uv sync --frozen --no-dev` |
 | Start Command | `uv run --no-dev uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Health Check Path | `/health` |
 | `PYTHON_VERSION` | `3.12.11` |

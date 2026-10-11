@@ -34,6 +34,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install Tesseract and English/Urdu language data
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-urd
+
       - name: Install dependencies
         run: uv sync --frozen --dev
 

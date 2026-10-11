@@ -5,10 +5,9 @@ it into plain language → track it against a patient profile → flag risk tren
 check drug interactions → scan medicine packaging → recommend a specialist →
 share a curated view with a doctor via time-limited QR.
 
-> **Status: Week 0 (setup).** Infrastructure is production-ready — the API runs
-> on Render against Neon Postgres, and CI/CD deploys on every merge to `main`.
-> The only implemented endpoint is `/health`; feature work starts at Sprint 1.
-> See [`docs/roadmap.md`](docs/roadmap.md) for the full 32-week plan.
+> **Status: Sprint 1 — report upload and OCR.** The app can extract report text
+> using English, Urdu script, or Roman Urdu modes. Later clinical features are
+> still planned. See [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
 
 ## Live
 
@@ -61,9 +60,19 @@ uv sync --dev
 uv run uvicorn main:app --reload --port 8000
 ```
 
+On Windows, install the English and Urdu OCR models once from PowerShell:
+
+```powershell
+cd api
+.\setup_ocr_languages.ps1
+```
+
 - Health: <http://localhost:8000/health>
 - Swagger: <http://localhost:8000/docs>
 - Tests: `uv run pytest -v`
+
+On Linux, install the OCR binaries and language data with `apt-get`; see
+[`api/README.md`](api/README.md#ocr-language-data) for local and Render setup.
 
 ### App
 

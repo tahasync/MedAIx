@@ -15,6 +15,19 @@ dependencies = [
     # which makes a `uv sync --frozen` deploy one uvicorn release away from an
     # ImportError at startup.
     "python-dotenv>=1.0.1",
+    # Sprint 1 — report upload + OCR.
+    # pytesseract is only a wrapper; it shells out to the Tesseract binary,
+    # which must be installed separately (winget UB-Mannheim.TesseractOCR).
+    "pytesseract>=0.3.13",
+    # Pillow handles decode/resize/grayscale/contrast. opencv-python is
+    # deliberately NOT used: deskew is a projection-profile calculation that
+    # numpy covers, and cv2 adds ~60 MB to every cold start on Render's free
+    # tier for no benefit here.
+    "pillow>=11.0.0",
+    "numpy>=2.1.0",
+    # PDF reports: render page 1 to an image, then run the same image path.
+    "pypdf>=5.1.0",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

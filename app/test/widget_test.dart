@@ -2,6 +2,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tahasync_medaix/src/upload_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -16,7 +17,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('MedAIx'), findsWidgets);
-    expect(find.text('Smarter care. Better lives.'), findsOneWidget);
+    expect(find.text('Your report, in readable text.'), findsOneWidget);
+    expect(find.text('Scan a report'), findsOneWidget);
+    expect(find.textContaining(String.fromCharCode(0x00C2)), findsNothing);
   });
 
   test('both themes expose the semantic extension', () {
@@ -38,8 +41,14 @@ void main() {
 
   test('neither theme uses pure black or pure white backgrounds', () {
     // §3b guardrail.
-    expect(AppTheme.light.scaffoldBackgroundColor, isNot(const Color(0xFFFFFFFF)));
-    expect(AppTheme.dark.scaffoldBackgroundColor, isNot(const Color(0xFF000000)));
+    expect(
+      AppTheme.light.scaffoldBackgroundColor,
+      isNot(const Color(0xFFFFFFFF)),
+    );
+    expect(
+      AppTheme.dark.scaffoldBackgroundColor,
+      isNot(const Color(0xFF000000)),
+    );
   });
 
   testWidgets('app renders under a forced dark theme', (tester) async {
@@ -49,8 +58,66 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: MedAIxApp()));
     await tester.pumpAndSettle();
 
-    final BuildContext context = tester.element(find.text('Smarter care. Better lives.'));
+    final BuildContext context = tester.element(
+      find.text('Your report, in readable text.'),
+    );
     expect(Theme.of(context).colorScheme.brightness, Brightness.dark);
+  });
+
+  testWidgets('upload screen offers English, Urdu, and Roman Urdu', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: UploadReportScreen(onPickFile: () async => null),
+        ),
+      ),
+    );
+
+    expect(find.text('Report language'), findsOneWidget);
+    expect(find.text('English'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<ReportOcrLanguage>));
+    await tester.pumpAndSettle();
+    expect(find.text('Urdu'), findsOneWidget);
+    expect(find.text('Roman Urdu'), findsOneWidget);
+
+    await tester.tap(find.text('Urdu').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Urdu script + English lab labels'), findsOneWidget);
+  });
+
+  testWidgets('camera permission denial offers file selection fallback', (
+    tester,
+  ) async {
+    var filePickerOpened = false;
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: UploadReportScreen(
+            onPickFile: () async {
+              filePickerOpened = true;
+              return null;
+            },
+            onTakePhoto: () async => null,
+            onRequestCameraPermission: () async => false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Take photo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Camera access'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Camera access not granted'), findsOneWidget);
+    await tester.tap(find.text('Choose file'));
+    await tester.pumpAndSettle();
+
+    expect(filePickerOpened, isTrue);
   });
 
   group('ApiClient.checkHealth', () {
@@ -58,17 +125,17 @@ void main() {
         ApiClient(baseUrl: 'http://localhost:8000', client: mock);
 
     test('returns true for a healthy service', () async {
-      final client = clientWith(MockClient(
-        (_) async => http.Response('{"status":"ok"}', 200),
-      ));
+      final client = clientWith(
+        MockClient((_) async => http.Response('{"status":"ok"}', 200)),
+      );
 
       expect(await client.checkHealth(), isTrue);
     });
 
     test('throws ApiException on a non-200 response', () async {
-      final client = clientWith(MockClient(
-        (_) async => http.Response('{"status":"degraded"}', 503),
-      ));
+      final client = clientWith(
+        MockClient((_) async => http.Response('{"status":"degraded"}', 503)),
+      );
 
       expect(client.checkHealth(), throwsA(isA<ApiException>()));
     });
@@ -76,37 +143,50 @@ void main() {
     // Regression: the http package reports a refused connection as
     // ClientException, which is not a SocketException. Missing this left the
     // UI's Loading state spinning forever on a dead backend.
-    test('wraps a refused connection (ClientException) in ApiException', () async {
-      final client = clientWith(MockClient((_) async {
-        throw http.ClientException('Connection closed before full header');
-      }));
+    test(
+      'wraps a refused connection (ClientException) in ApiException',
+      () async {
+        final client = clientWith(
+          MockClient((_) async {
+            throw http.ClientException('Connection closed before full header');
+          }),
+        );
 
-      expect(
-        client.checkHealth(),
-        throwsA(
-          isA<ApiException>()
-              .having((e) => e.error, 'error', isA<http.ClientException>()),
-        ),
-      );
-    });
+        expect(
+          client.checkHealth(),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.error,
+              'error',
+              isA<http.ClientException>(),
+            ),
+          ),
+        );
+      },
+    );
 
     // Driven by a fake clock rather than a real delay: the production timeout is
     // a build-time --dart-define, and each attempt is retried, so a wall-clock
     // sleep would be both flaky and slow. Elapsing past one attempt's deadline
     // is enough to trip it; the fake clock makes the remaining two free.
     test('wraps an expired deadline (TimeoutException) in ApiException', () {
-      final client = clientWith(MockClient((_) async {
-        await Future<void>.delayed(const Duration(minutes: 5));
-        return http.Response('{"status":"ok"}', 200);
-      }));
+      final client = clientWith(
+        MockClient((_) async {
+          await Future<void>.delayed(const Duration(minutes: 5));
+          return http.Response('{"status":"ok"}', 200);
+        }),
+      );
 
       Object? caught;
       fakeAsync((async) {
         // Block-bodied onError: an expression body would return the
         // assignment's value, which is not the Future<bool>'s type.
-        client.checkHealth().then((_) {}, onError: (Object e) {
-          caught = e;
-        });
+        client.checkHealth().then(
+          (_) {},
+          onError: (Object e) {
+            caught = e;
+          },
+        );
         // 30s timeout + 2s retry gap, three times over, with slack.
         async.elapse(const Duration(minutes: 5));
       });
@@ -117,25 +197,32 @@ void main() {
     // Cold starts, not breakage: Render's edge answers 502/503 while a
     // sleeping free instance boots. Retrying transparently is the difference
     // between "it worked on the second try" and a false alarm.
-    test('recovers when an early attempt fails but the service wakes', () async {
-      var calls = 0;
-      final client = clientWith(MockClient((_) async {
-        calls++;
-        if (calls == 1) throw http.ClientException('Connection reset');
-        return http.Response('{"status":"ok"}', 200);
-      }));
+    test(
+      'recovers when an early attempt fails but the service wakes',
+      () async {
+        var calls = 0;
+        final client = clientWith(
+          MockClient((_) async {
+            calls++;
+            if (calls == 1) throw http.ClientException('Connection reset');
+            return http.Response('{"status":"ok"}', 200);
+          }),
+        );
 
-      expect(await client.checkHealth(), isTrue);
-      expect(calls, 2);
-    });
+        expect(await client.checkHealth(), isTrue);
+        expect(calls, 2);
+      },
+    );
 
     // A 4xx is a real answer, not a blip. Retrying it only delays the error.
     test('does not retry a 4xx response', () async {
       var calls = 0;
-      final client = clientWith(MockClient((_) async {
-        calls++;
-        return http.Response('nope', 404);
-      }));
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          return http.Response('nope', 404);
+        }),
+      );
 
       await expectLater(client.checkHealth(), throwsA(isA<ApiException>()));
       expect(calls, 1);
@@ -144,10 +231,12 @@ void main() {
     // Every attempt failing must still surface, not loop forever.
     test('gives up after the configured number of attempts', () async {
       var calls = 0;
-      final client = clientWith(MockClient((_) async {
-        calls++;
-        throw http.ClientException('Connection refused');
-      }));
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          throw http.ClientException('Connection refused');
+        }),
+      );
 
       await expectLater(client.checkHealth(), throwsA(isA<ApiException>()));
       expect(calls, 3);
@@ -156,9 +245,9 @@ void main() {
     // ApiException raised for a non-200 must not be re-wrapped, or callers
     // lose the status code they branch on.
     test('does not re-wrap ApiException', () async {
-      final client = clientWith(MockClient(
-        (_) async => http.Response('nope', 500),
-      ));
+      final client = clientWith(
+        MockClient((_) async => http.Response('nope', 500)),
+      );
 
       await expectLater(
         client.checkHealth(),
@@ -186,7 +275,8 @@ void main() {
       );
 
       await tester.pumpWidget(appWithClient(client));
-      await tester.tap(find.text('Check connection'));
+      await tester.ensureVisible(find.text('Check service connection'));
+      await tester.tap(find.text('Check service connection'));
       await tester.pumpAndSettle();
 
       expect(find.text('Connected to the MedAIx service.'), findsOneWidget);
@@ -205,7 +295,8 @@ void main() {
       );
 
       await tester.pumpWidget(appWithClient(client));
-      await tester.tap(find.text('Check connection'));
+      await tester.ensureVisible(find.text('Check service connection'));
+      await tester.tap(find.text('Check service connection'));
       await tester.pumpAndSettle();
 
       expect(find.text('Could not reach the MedAIx service.'), findsOneWidget);

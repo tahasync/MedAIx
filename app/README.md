@@ -1,7 +1,10 @@
 # MedAIx — Flutter client
 
-The Android client for MedAIx. Week 0: providers, routing, and the brand theme
-are in place; the only screen so far is a health check against the API.
+The Flutter client for MedAIx. Sprint 1 includes camera capture with an
+explained runtime permission, report file selection, language selection
+(English, Urdu, and Roman Urdu), OCR progress, results, and recovery states,
+alongside the API health check. Camera photos and selected files use the same
+language-aware OCR request.
 
 See the [root README](../README.md) for the full stack and deployment notes, and
 [`docs/color-system.md`](../docs/color-system.md) for the design spec.
@@ -60,5 +63,6 @@ flutter test
 | --- | --- |
 | `lib/src/api_client.dart` | HTTP wrapper with retry/timeout handling |
 | `lib/src/providers.dart` | Riverpod providers, incl. theme mode |
-| `lib/src/router.dart` | Routing and the health-check screen |
+| `lib/src/router.dart` | Routing and the home screen |
+| `lib/src/upload_screen.dart` | Report upload, language selection, and OCR result states |
 | `lib/src/theme.dart` | Brand palette, light/dark schemes, semantic colors |
