@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -255,6 +257,143 @@ void main() {
           isA<ApiException>().having((e) => e.statusCode, 'statusCode', 500),
         ),
       );
+    });
+  });
+
+  group('ApiClient.uploadReport', () {
+    ApiClient clientWith(MockClient mock) =>
+        ApiClient(baseUrl: 'http://localhost:8000', client: mock);
+
+    late Directory tempDir;
+    late String filePath;
+
+    setUpAll(() {
+      tempDir = Directory.systemTemp.createTempSync('medaix_upload_test');
+      filePath = '${tempDir.path}/report.pdf';
+      // A minimal, non-empty payload so the multipart body is well-formed.
+      File(filePath).writeAsBytesSync(const <int>[
+        0x25,
+        0x50,
+        0x44,
+        0x46,
+        0x0A,
+      ]); // '%PDF\n'
+    });
+
+    tearDownAll(() {
+      tempDir.deleteSync(recursive: true);
+    });
+
+    test('returns the parsed OCR result on success', () async {
+      final client = clientWith(
+        MockClient(
+          (_) async => http.Response(
+            '{"id":7,"text":"Hemoglobin 13.2","confidence":91.5,'
+            '"skew_corrected_degrees":0.4,"language":"urdu"}',
+            200,
+          ),
+        ),
+      );
+
+      final result = await client.uploadReport(filePath);
+
+      expect(result.id, 7);
+      expect(result.text, 'Hemoglobin 13.2');
+      expect(result.confidence, 91.5);
+      expect(result.language, 'urdu');
+      expect(result.isLowConfidence, isFalse);
+    });
+
+    // Regression for the reported bug: a cold Render edge answers a bare 503
+    // (no FastAPI body) on the first upload after the free instance sleeps.
+    // The client must retry that instead of surfacing "busy right now" as a
+    // permanent failure the user cannot distinguish from a broken deploy.
+    test('retries a cold-start 503 and recovers when the service wakes', () async {
+      var calls = 0;
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          if (calls == 1) return http.Response('', 503); // bare edge 503
+          return http.Response(
+            '{"id":1,"text":"ok","confidence":80,'
+            '"skew_corrected_degrees":0,"language":"english"}',
+            200,
+          );
+        }),
+      );
+
+      final result = await client.uploadReport(filePath);
+
+      expect(result.text, 'ok');
+      expect(calls, 2);
+    });
+
+    // A 4xx is a real answer, not a blip. Retrying it only delays the error.
+    test('does not retry a 4xx response', () async {
+      var calls = 0;
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          return http.Response(
+            '{"detail":"That file type is not supported."}',
+            415,
+          );
+        }),
+      );
+
+      await expectLater(
+        client.uploadReport(filePath),
+        throwsA(isA<ApiException>()),
+      );
+      expect(calls, 1);
+    });
+
+    // Every attempt failing must still surface, not loop forever. A 503 with
+    // no body maps to the busy wording that prompted this fix.
+    test('gives up after the configured number of attempts', () async {
+      var calls = 0;
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          return http.Response('', 503);
+        }),
+      );
+
+      await expectLater(
+        client.uploadReport(filePath),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            'Report scanning is busy right now. Please try again shortly.',
+          ),
+        ),
+      );
+      expect(calls, 3);
+    });
+
+    // A transport error (no status code) is retryable and must rebuild the
+    // one-shot MultipartRequest body on each attempt.
+    test('retries a transport failure and gives up cleanly', () async {
+      var calls = 0;
+      final client = clientWith(
+        MockClient((_) async {
+          calls++;
+          throw http.ClientException('Connection reset by peer');
+        }),
+      );
+
+      await expectLater(
+        client.uploadReport(filePath),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            isNull,
+          ),
+        ),
+      );
+      expect(calls, 3);
     });
   });
 

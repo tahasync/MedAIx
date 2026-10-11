@@ -108,10 +108,17 @@ jobs:
           # pubspec `name` is the Dart package (tahasync_medaix), not the brand,
           # so the artifact name is built from the product name only.
           # 0.1.0+1 -> v0.1.0-1; '+' is legal in filenames but reads badly.
-          SLUG=$(printf 'v%s' "$VERSION" | tr '+' '-')
+          VERSION_SLUG=$(printf 'v%s' "$VERSION" | tr '+' '-')
+          # Fold in the branch or tag name so artifacts are unique and
+          # traceable. Two sprints at the same pubspec version no longer
+          # collide on one filename (the old scheme emitted
+          # MedAIx-v0.1.0-1-release.apk for every release). Sanitize to a
+          # filename/URL-safe set, since branch refs can contain '/'.
+          REF_SLUG=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')
+          SLUG="MedAIx-${REF_SLUG}-${VERSION_SLUG}-release"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "slug=MedAIx-$SLUG-release" >> "$GITHUB_OUTPUT"
-          echo "Building MedAIx v$VERSION"
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "Building MedAIx v$VERSION ($SLUG)"
 
       - name: Resolve API base URL
         # Injected at compile time: providers.dart reads API_BASE_URL via

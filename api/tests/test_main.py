@@ -299,6 +299,40 @@ def test_upload_report_corrects_skew(client: TestClient) -> None:
     assert response.json()["skew_corrected_degrees"] != 0.0
 
 
+def test_preprocess_downscales_oversized_image() -> None:
+    """A 12 MP photo is reined in to the max long edge before OCR.
+
+    Tesseract's cost and memory both scale with pixel count, so a full-resolution
+    phone photo fed straight in is the slowest step of the request for no accuracy
+    gain past ~300 DPI. The long edge must be clamped down, never left oversized.
+    """
+    oversized = Image.new("L", (4000, 3000), color=255)
+
+    prepared, _skew = ocr_module.preprocess(oversized)
+
+    assert max(prepared.size) == ocr_module._MAX_LONG_EDGE
+    # Aspect ratio preserved: a 4:3 frame stays 4:3 after scaling.
+    assert prepared.width * 3000 == prepared.height * 4000
+
+
+def test_preprocess_upscales_small_image() -> None:
+    """A small image is still upscaled so fine print survives binarisation."""
+    small = Image.new("L", (800, 600), color=255)
+
+    prepared, _skew = ocr_module.preprocess(small)
+
+    assert max(prepared.size) == ocr_module._MIN_LONG_EDGE
+
+
+def test_preprocess_leaves_in_range_image_untouched() -> None:
+    """An already well-sized scan is returned as-is, not needlessly resampled."""
+    sized = Image.new("L", (2000, 2500), color=255)
+
+    prepared, _skew = ocr_module.preprocess(sized)
+
+    assert prepared.size == (2000, 2500)
+
+
 def test_openapi_documents_upload_route(client: TestClient) -> None:
     """The upload route must appear in the schema for the client to target it."""
     schema = client.get("/openapi.json").json()
