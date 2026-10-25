@@ -46,6 +46,14 @@ jobs:
         with:
           api-level: 34
           constructs: buildtools;34.0.0
+          accept-licenses: |
+            android-sdk-license,
+            android-sdk-preview-license,
+            android-googletv-license,
+            android-googlexr-license,
+            android-sdk-arm-dbt-license,
+            microxr-sysimage-license,
+            mips-android-sysimage-license
 
       - name: Build debug APK with Sprint 3 flag
         run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=3
