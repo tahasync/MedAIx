@@ -56,7 +56,7 @@ Future<void> _expect(
   bool present = true,
 }) async {
   final bool found = await _reveal(tester, finder);
-  expect(found, present, reason: '${finder.describeMatch(Plurality.one)}');
+  expect(found, present, reason: finder.describeMatch(Plurality.one));
 }
 
 Future<void> _tap(WidgetTester tester, Finder finder) async {
