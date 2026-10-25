@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light launch splash: Paper from the brand palette. Dark override
+         lives in values-night. Must stay a single flat hex — no gradient. -->
+    <color name="splash_background">#F7F4F2</color>
+    <color name="ic_launcher_background">#182346</color>
+</resources>

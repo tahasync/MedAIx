@@ -10,9 +10,21 @@ The Flutter client for MedAIx.
   screen (view, edit, delete), and the simplified-report screen that lists
   scanned reports and rewrites a chosen one in plain language with a
   side-by-side original view.
+- **UI rebuild:** a flat, token-driven design system with a five-tab floating
+  nav (Home, Reports, Meds, Wellness, More), per-value report cards and
+  trends, a medicine interaction check and packet scanner, wellness habits,
+  time-limited sharing with a doctor (QR + portal preview), reminders, and
+  light / dark / system theme — all with empty, loading, error, offline and
+  permission states. Medicines, wellness, share, doctor match and insights run
+  on in-memory fakes until their backend lands, and **screens are gated by
+  sprint** (`MEDAIX_SPRINT`, default 3): a build only shows the epics the
+  roadmap has delivered — currently Home, Reports (upload, report, trends)
+  and More (profile, appearance, account, help).
 
-See the [root README](../README.md) for the full stack and deployment notes, and
-[`docs/color-system.md`](../docs/color-system.md) for the design spec.
+See the [root README](../README.md) for the full stack and deployment notes,
+[`docs/color-system.md`](../docs/color-system.md) for the palette, and
+[`docs/design-system.md`](../docs/design-system.md) for the UI/UX system
+(type scale, spacing, radii, elevation, motion, component rules).
 
 ## Requirements
 
@@ -57,6 +69,8 @@ pointing at localhost.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `API_BASE_URL` | `http://localhost:8000` | API root |
+| `MEDAIX_SPRINT` | `3` | Sprint this build represents; tabs, tiles, settings rows and routes from later sprints are hidden (`13` shows everything for a demo) |
+| `MEDAIX_FAKE_DATA` | `false` | Use in-memory fakes for reports and profile too (no backend needed) |
 | `SUPABASE_URL` | the hosted project | Supabase project URL |
 | `SUPABASE_ANON_KEY` | *(empty — sign-in disabled)* | Supabase publishable key |
 | `API_HEALTH_TIMEOUT` | `30` | Seconds to wait for one health probe |
@@ -64,7 +78,7 @@ pointing at localhost.
 | `API_UPLOAD_ATTEMPTS` | `3` | Retries for upload / simplify / list calls |
 
 The timeout is generous because the free Render instance can take ~50s to wake
-from sleep. See `lib/src/api_client.dart`.
+from sleep. See `lib/data/api/api_client.dart`.
 
 ## Test
 
@@ -77,13 +91,55 @@ flutter test
 
 | Path | Purpose |
 | --- | --- |
-| `lib/src/api_client.dart` | HTTP wrapper with retry/timeout handling |
-| `lib/src/auth.dart` | Supabase session gateway (faked in tests) |
-| `lib/src/auth_screen.dart` | Sign-in / create account |
-| `lib/src/onboarding_screen.dart` | Three-step profile questionnaire |
-| `lib/src/profile_screen.dart` | View, edit, and delete the profile |
-| `lib/src/providers.dart` | Riverpod providers: theme, auth, upload, simplify, reports, profile |
-| `lib/src/router.dart` | Routing, the sign-in/onboarding gate, and the home screen |
-| `lib/src/simplify_screen.dart` | Report history and the plain-language result page |
-| `lib/src/upload_screen.dart` | Report upload, language selection, and OCR result states |
-| `lib/src/theme.dart` | Brand palette, light/dark schemes, semantic colors |
+| `lib/main.dart` | `ProviderScope` → `BootSplash` → `MaterialApp.router` (text scale clamped 0.8–2.0) |
+| `lib/theme/app_colors.dart` | `AppColors` ThemeExtension — every colour token for dark and light — plus the locked `Brand` palette |
+| `lib/theme/app_tokens.dart` | `AppSpace`, `AppRadius`, `AppSize`, `AppMotion`, `AppType`, `AppShadow` |
+| `lib/theme/app_theme.dart` | `AppTheme.light` / `.dark` built from the tokens; flat Material 3 component themes |
+| `lib/core/features.dart` | `FeatureFlags` / `featuresProvider`: sprint gating driven by `MEDAIX_SPRINT` |
+| `lib/core/router.dart` | go_router: `StatefulShellRoute` with the tabs of the current sprint, nested sub-routes, short-path aliases, sign-in redirect and the onboarding gate (`AppShell`) |
+| `lib/core/widgets/` | The component kit (`AppScreen`, `AppCard`, buttons, chips, `StatusLabel`, `ListRow`, `ProgressBar`, skeletons, `EmptyState`, `ErrorCard`, `OfflineBanner`, `AppSwitch`, `FloatingNav`, `QrCard`, `showToast`) |
+| `lib/core/brand/brand.dart` | Brand lockup, tile mark, cold-start splash |
+| `lib/core/connectivity.dart` | `isOfflineProvider` (connectivity_plus) behind the offline banner |
+| `lib/core/update_checker.dart` | "Update available" check against GitHub releases; shown once per session from the shell |
+| `lib/data/repositories.dart` | Riverpod providers wiring each repository interface to its implementation (`--dart-define=MEDAIX_FAKE_DATA=true` swaps reports/profile to fakes) |
+| `lib/data/api/` | `ApiClient` (HTTP, retry/timeout) and the API-backed reports/profile repositories |
+| `lib/data/fake/` | In-memory fakes: reports, meds, wellness, share, doctor match, insights, profile, settings |
+| `lib/data/prefs/` | SharedPreferences-backed settings (theme mode, reminders, onboarding seen) |
+| `lib/features/<feature>/{data,providers,ui}` | auth, onboarding, home, reports (list / upload / report / trends), meds (list / scan), wellness, doctor, share (QR / doctor portal), settings (settings / reminders), profile, gallery |
+| `test/support/test_app.dart` | `testApp()`, `testAppAt(route)`, `testScreen(widget)` and zero-latency `fakeOverrides()` |
+| `test/design_system_test.dart` | Palette / contrast / hit-target / no-blur-no-gradient guards |
+
+## Design system
+
+Flat, minimal and production-oriented; the visual source of truth is
+[`design/medaix-mockup.html`](../design/medaix-mockup.html) and the rules are in
+[`AGENTS.md`](../AGENTS.md) §3 with the implemented tokens documented in
+[`docs/design-system.md`](../docs/design-system.md). In short:
+
+- **No glass.** No `BackdropFilter`, blur, gradients, glow or decorative
+  shadows; the only shadow is under the floating bottom nav. Depth comes from
+  `background` → `surface` → `surface2` tone steps.
+- **One colour source.** Widgets read `context.colors.<token>`; there are no
+  hex literals or `Colors.*` swatches outside `lib/theme/`, and
+  `test/design_system_test.dart` fails if any appear.
+- **Fonts** are bundled under `assets/fonts/` (SIL OFL licences alongside):
+  Figtree for all UI text, Noto Sans as the fallback. Bundling instead of
+  `google_fonts` keeps first paint deterministic offline and avoids a runtime
+  download on a health app.
+- **Icons** are Lucide via `lucide_icons_flutter`; status is never conveyed by
+  colour alone (`StatusLabel` / `CardTag` pair an icon with text).
+- **States.** Every screen ships Normal, Empty, Loading (skeleton), Error,
+  Success, Offline, Permission-denied and Disabled states; copy is sentence
+  case with action-named CTAs and errors always say whether data is safe.
+- **Theme mode** (System / Light / Dark) persists in SharedPreferences and is
+  chosen in Settings. The `/gallery` route (debug builds) renders the whole
+  kit in both themes.
+## Branding
+
+`assets/logo.png` is the complete lockup (gradient tile, "MedAIx" wordmark,
+"SMARTER CARE. BETTER LIVES." tagline). It is shown by the Flutter-side splash,
+the sign-in screen, and the profile-loading gate. The launcher icon is the tile
+only: Android clips adaptive icons to a circle or squircle and the Android 12+
+system splash draws that icon, so the wordmark cannot fit there. Every bitmap
+(launcher icons, `launch_image.png`, iOS `LaunchImage`, `assets/*.png`) is
+generated by `tool/generate_icons.py`; do not hand-edit them.
