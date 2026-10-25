@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# MedAIx API image.
+# MedAIx API image (Sprint 2: OCR upload + plain-language simplification +
+# profile storage + Supabase-verified sign-in).
 #
 # Why Docker instead of a native Render build command: the API shells out to the
 # Tesseract binary (via pytesseract), and Tesseract is NOT part of Render's
@@ -9,6 +10,15 @@
 # request time and every upload returns 503 "Tesseract is not installed".
 # Baking Tesseract (plus the eng/urd traineddata) into the image is Render's
 # documented way to ship a system dependency it does not preinstall.
+#
+# Runtime configuration (all read from the environment, none baked in):
+#   DATABASE_URL / NEON_DATABASE_URL  pooled Neon Postgres URL; SQLite otherwise
+#   SUPABASE_URL                      public project URL; auth.py verifies
+#                                     access tokens against its JWKS. Only the
+#                                     public key set is fetched: the publishable
+#                                     key, secret key and JWT secret are never
+#                                     needed here and must not be set.
+#   PORT                              injected by Render; 8000 for local runs
 
 FROM python:3.12-slim
 
@@ -24,8 +34,9 @@ RUN apt-get update \
         tesseract-ocr-urd \
     && rm -rf /var/lib/apt/lists/*
 
-# uv — the project's package manager (see pyproject.toml / uv.lock).
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# uv — the project's package manager (see pyproject.toml / uv.lock). Pinned so
+# the image builds the same way next month; bump deliberately.
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
@@ -35,24 +46,35 @@ WORKDIR /app
 #                              not hardlinks into a build cache absent from the
 #                              image) so the runtime venv survives on its own
 #   UV_PROJECT_ENVIRONMENT     fixed, known venv path referenced by the CMD
-#   PYTHONPATH=/app            make `main` (and database/models/ocr) importable
-#                              without installing the flat-layout project wheel
+#   PYTHONPATH=/app            make `main` (and auth/database/models/ocr/
+#                              profile/simplify) importable without installing
+#                              the flat-layout project wheel
+#   PYTHONUNBUFFERED=1         log lines reach Render's log stream immediately
 #   PORT                       Render injects the port; 8000 for local runs
 ENV UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
     PORT=8000
 
 # Install dependencies first (without the project) so this layer is cached and
-# only invalidated when pyproject.toml / uv.lock change. Trim the uv cache so it
-# is not baked into the final image.
+# only invalidated when pyproject.toml / uv.lock change. --no-dev leaves pytest
+# and httpx out of the runtime image. Trim the uv cache so it is not baked in.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
     && uv cache clean
 
-# Application code.
+# Application code. .dockerignore keeps .env, databases, tests, samples and
+# caches out of the context, so nothing secret or bulky lands in the image.
 COPY . .
+
+# Run as an unprivileged user. It owns /app so the SQLite fallback
+# (medaix.db, used only when no DATABASE_URL is set) can be created for local
+# runs; production points at Neon and writes nothing to disk.
+RUN useradd --system --no-create-home --uid 10001 medaix \
+    && chown -R medaix:medaix /app
+USER medaix
 
 EXPOSE 8000
 
