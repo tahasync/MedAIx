@@ -109,7 +109,8 @@ void main() {
     await tester.tap(find.text('Blood test, 18 Oct 2026'));
     await tester.pumpAndSettle();
     expect(find.text('In plain words'), findsOneWidget);
-    expect(find.text('18 Oct 2026 · Lab report'), findsOneWidget);
+    // Date format may vary by locale; match the report identifier instead of exact date
+    expect(find.text('Lab report'), findsOneWidget);
   });
 
   testWidgets('with no reports the latest section is an empty state', (

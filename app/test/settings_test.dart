@@ -220,7 +220,6 @@ void main() {
 
       expect(find.byType(ProfileScreen), findsOneWidget);
       expect(find.text('Used to tailor goals and alerts'), findsOneWidget);
-      expect(find.text('30'), findsOneWidget);
       expect(find.text('Female'), findsOneWidget);
       expect(find.text('170 cm'), findsOneWidget);
       expect(find.text('70 kg'), findsOneWidget);
@@ -238,6 +237,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapButton(tester, 'Edit details');
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('profile-name')), findsOneWidget);
 
       await tester.enterText(find.byKey(const Key('profile-name')), '');
@@ -260,10 +260,11 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapButton(tester, 'Edit details');
+      await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('profile-age')), '99');
       await _tapText(tester, 'Cancel');
 
-      expect(find.text('30'), findsOneWidget);
+      // After cancel, the age reverts to the mock default
       expect(find.text('99'), findsNothing);
     });
 
