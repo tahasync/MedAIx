@@ -1,6 +1,7 @@
 /// Thin HTTP wrapper over the MedAIx API.
 ///
-/// HTTP calls for service health and Sprint 1 report upload.
+/// Service health, report upload (Sprint 1), and simplification, report
+/// history, and patient profile (Sprint 2).
 library;
 
 import 'dart:async';
@@ -25,11 +26,20 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
-  ApiClient({required this.baseUrl, http.Client? client})
+  ApiClient({required this.baseUrl, http.Client? client, this.accessToken})
     : _client = client ?? http.Client();
 
   final String baseUrl;
   final http.Client _client;
+
+  /// Current Supabase access token, read at request time so a refresh is picked up.
+  final String? Function()? accessToken;
+
+  Map<String, String> _authorized(Map<String, String> headers) {
+    final token = accessToken?.call();
+    if (token == null || token.isEmpty) return headers;
+    return {...headers, 'Authorization': 'Bearer $token'};
+  }
 
   /// Timeout for a single connectivity attempt.
   ///
@@ -196,6 +206,7 @@ class ApiClient {
       Uri.parse('$baseUrl/upload-report'),
     );
     request.fields['language'] = language;
+    request.headers.addAll(_authorized({}));
 
     final file = await File(filePath).readAsBytes();
     request.files.add(
@@ -248,12 +259,141 @@ class ApiClient {
     }
   }
 
+  // ---- Sprint 2: simplify + report history ----
+
+  /// `POST /simplify-report`. Returns the plain-language simplification of a
+  /// stored report, plus how many medical terms were reworded.
+  ///
+  /// Retried on transport failures and 5xx like [uploadReport], so a sleeping
+  /// free-tier instance does not surface as a permanent error. Safe because
+  /// the endpoint is idempotent: a second call returns the stored text.
+  ///
+  /// Errors are mapped to user-safe [ApiException]s; the server's `detail`
+  /// strings are already written for display.
+  Future<SimplifyResult> simplifyReport(
+    int reportId, {
+    Duration timeout = const Duration(seconds: 30),
+  }) => _withRetry(() => _attemptSimplify(reportId, timeout: timeout));
+
+  /// Run [attempt] up to [_uploadAttempts] times, pausing [_uploadRetryDelay]
+  /// between tries. 4xx answers are final and rethrown immediately.
+  Future<T> _withRetry<T>(Future<T> Function() attempt) async {
+    for (var tries = 1; ; tries++) {
+      try {
+        return await attempt();
+      } on ApiException catch (error) {
+        final isLast = tries >= _uploadAttempts;
+        if (isLast || !_isRetryableStatus(error.statusCode)) rethrow;
+        await Future<void>.delayed(_uploadRetryDelay);
+      }
+    }
+  }
+
+  Future<SimplifyResult> _attemptSimplify(
+    int reportId, {
+    required Duration timeout,
+  }) async {
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('$baseUrl/simplify-report'),
+            headers: _authorized({'Content-Type': 'application/json'}),
+            body: jsonEncode({'report_id': reportId}),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return SimplifyResult.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
+      }
+
+      throw ApiException(
+        _detailFrom(response),
+        statusCode: response.statusCode,
+      );
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException(
+        'Simplifying your report took too long. Please try again — '
+        'your file has not been lost.',
+      );
+    } on SocketException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on http.ClientException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The connection to MedAIx was interrupted.',
+        error: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        'The service returned an unexpected response.',
+        error: error,
+      );
+    }
+  }
+
+  /// `GET /reports`. Lists stored reports newest first for the history screen.
+  /// Retried like [simplifyReport]; a read has no side effects.
+  Future<List<ReportSummary>> fetchReports({
+    Duration timeout = const Duration(seconds: 30),
+  }) => _withRetry(() => _attemptFetchReports(timeout: timeout));
+
+  Future<List<ReportSummary>> _attemptFetchReports({
+    required Duration timeout,
+  }) async {
+    try {
+      final response = await _client
+          .get(Uri.parse('$baseUrl/reports'), headers: _authorized({}))
+          .timeout(timeout);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final List<dynamic> body = jsonDecode(response.body) as List<dynamic>;
+        return body
+            .map((json) => ReportSummary.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+
+      throw ApiException(
+        _detailFrom(response),
+        statusCode: response.statusCode,
+      );
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException(
+        'Loading your reports took too long. Please try again.',
+      );
+    } on SocketException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on http.ClientException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The connection to MedAIx was interrupted.',
+        error: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        'The service returned an unexpected response.',
+        error: error,
+      );
+    }
+  }
+
   /// Pull the server's `detail` out of an error body, falling back to a
   /// status-appropriate message when the body is not the expected shape.
   ///
   /// Never surfaces a raw status code: 422 means something different depending
   /// on why it failed, and "422" tells a user nothing actionable.
-  String _detailFrom(http.Response response) {
+  String _detailFrom(
+    http.Response response, {
+    String fallback =
+        'Something went wrong while reading your report. Please try again.',
+  }) {
     try {
       final body = jsonDecode(response.body);
       if (body is Map<String, dynamic> && body['detail'] is String) {
@@ -268,9 +408,124 @@ class ApiClient {
         'That file is too large to upload. Try a photo of just the report.',
       415 => 'That file type is not supported. Upload a JPEG, PNG, or PDF.',
       422 => 'We could not read that report. Try a clearer photo.',
+      401 => 'Please sign in to continue.',
       503 => 'Report scanning is busy right now. Please try again shortly.',
-      _ => 'Something went wrong while reading your report. Please try again.',
+      _ => fallback,
     };
+  }
+
+  // ---- Profile ----
+
+  Future<PatientProfile> fetchProfile({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    return _profileResult(
+      () => _client
+          .get(Uri.parse('$baseUrl/profile'), headers: _authorized({}))
+          .timeout(timeout),
+      fallback: 'Could not load your profile. Please try again.',
+    );
+  }
+
+  Future<PatientProfile> saveProfile({
+    required String name,
+    required int age,
+    required double weight,
+    required double height,
+    required String sex,
+    required String conditions,
+    required String medications,
+    required String allergies,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    return _profileResult(
+      () => _client
+          .put(
+            Uri.parse('$baseUrl/profile'),
+            headers: _authorized({'Content-Type': 'application/json'}),
+            body: jsonEncode({
+              'name': name,
+              'age': age,
+              'weight': weight,
+              'height': height,
+              'sex': sex,
+              'conditions': conditions,
+              'medications': medications,
+              'allergies': allergies,
+            }),
+          )
+          .timeout(timeout),
+      fallback: 'Could not save your profile. Please try again.',
+    );
+  }
+
+  Future<void> deleteProfile({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    try {
+      final response = await _client
+          .delete(Uri.parse('$baseUrl/profile'), headers: _authorized({}))
+          .timeout(timeout);
+      if (response.statusCode >= 200 && response.statusCode < 300) return;
+      throw ApiException(
+        _detailFrom(
+          response,
+          fallback: 'Could not delete your profile. Please try again.',
+        ),
+        statusCode: response.statusCode,
+      );
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException(
+        'Deleting your profile took too long. Please try again.',
+      );
+    } on SocketException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on http.ClientException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The connection to MedAIx was interrupted.',
+        error: error,
+      );
+    }
+  }
+
+  Future<PatientProfile> _profileResult(
+    Future<http.Response> Function() send, {
+    required String fallback,
+  }) async {
+    try {
+      final response = await send();
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return PatientProfile.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
+      }
+      throw ApiException(
+        _detailFrom(response, fallback: fallback),
+        statusCode: response.statusCode,
+      );
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException(fallback);
+    } on SocketException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on http.ClientException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The connection to MedAIx was interrupted.',
+        error: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        'The service returned an unexpected response.',
+        error: error,
+      );
+    }
   }
 }
 
@@ -305,4 +560,103 @@ class OcrUploadResult {
   /// reaches the success state is at or above the floor. Used only to warn
   /// that a low-but-passing read may be worth re-photographing.
   bool get isLowConfidence => confidence < 60;
+}
+
+/// Result of a successful `/simplify-report` call.
+class SimplifyResult {
+  const SimplifyResult({
+    required this.id,
+    required this.originalText,
+    required this.simplifiedText,
+    this.termsSimplified,
+    this.sentenceCount,
+    required this.note,
+  });
+
+  factory SimplifyResult.fromJson(Map<String, dynamic> json) {
+    return SimplifyResult(
+      id: json['id'] as int,
+      originalText: json['original_text'] as String? ?? '',
+      simplifiedText: json['simplified_text'] as String? ?? '',
+      termsSimplified: (json['terms_simplified'] as num?)?.toInt(),
+      sentenceCount: (json['sentence_count'] as num?)?.toInt(),
+      note: json['note'] as String? ?? '',
+    );
+  }
+
+  final int id;
+  final String originalText;
+  final String simplifiedText;
+  final int? termsSimplified;
+  final int? sentenceCount;
+  final String note;
+}
+
+/// One row from `GET /reports`, used by the report-history screen.
+class ReportSummary {
+  const ReportSummary({
+    required this.id,
+    required this.uploadedAt,
+    required this.confidence,
+    required this.hasSimplified,
+    required this.imagePath,
+  });
+
+  factory ReportSummary.fromJson(Map<String, dynamic> json) {
+    return ReportSummary(
+      id: json['id'] as int,
+      uploadedAt: json['uploaded_at'] as String? ?? '',
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
+      hasSimplified: json['has_simplified'] as bool? ?? false,
+      imagePath: json['image_path'] as String? ?? '',
+    );
+  }
+
+  final int id;
+  final String uploadedAt;
+  final double confidence;
+  final bool hasSimplified;
+  final String imagePath;
+}
+
+/// Signed-in patient profile from `GET /profile` and `PUT /profile`.
+class PatientProfile {
+  const PatientProfile({
+    required this.id,
+    required this.name,
+    required this.age,
+    required this.weight,
+    required this.height,
+    required this.sex,
+    required this.conditions,
+    required this.medications,
+    required this.allergies,
+    required this.onboardingComplete,
+  });
+
+  factory PatientProfile.fromJson(Map<String, dynamic> json) {
+    return PatientProfile(
+      id: json['id'] as int,
+      name: json['name'] as String?,
+      age: (json['age'] as num?)?.toInt(),
+      weight: (json['weight'] as num?)?.toDouble(),
+      height: (json['height'] as num?)?.toDouble(),
+      sex: json['sex'] as String?,
+      conditions: json['conditions'] as String? ?? '',
+      medications: json['medications'] as String? ?? '',
+      allergies: json['allergies'] as String? ?? '',
+      onboardingComplete: json['onboarding_complete'] as bool? ?? false,
+    );
+  }
+
+  final int id;
+  final String? name;
+  final int? age;
+  final double? weight;
+  final double? height;
+  final String? sex;
+  final String conditions;
+  final String medications;
+  final String allergies;
+  final bool onboardingComplete;
 }

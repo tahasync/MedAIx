@@ -1,10 +1,10 @@
 """SQLAlchemy models for MedAIx.
 
-Structured rows only — report images and medicine photos belong in Firebase
+Structured rows only — report images and medicine photos belong in Supabase
 Storage, not Postgres (Neon's free tier is 0.5 GB).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -18,6 +18,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+
+def utc_now() -> datetime:
+    """Current UTC time as a naive datetime.
+
+    The timestamp columns below are ``DateTime`` without a timezone and every
+    existing row holds naive UTC, so new values keep that shape. This replaces
+    ``datetime.utcnow``, which is deprecated in Python 3.12.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
 from database import Base
 
 
@@ -25,7 +35,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    firebase_uid = Column(String, unique=True, index=True, nullable=False)
+    supabase_uid = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=True)
     age = Column(Integer, nullable=True)
     weight = Column(Float, nullable=True)
@@ -34,7 +44,7 @@ class User(Base):
     conditions = Column(Text, nullable=True)
     medications = Column(Text, nullable=True)
     allergies = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     reports = relationship("Report", back_populates="user")
     medicines = relationship("Medicine", back_populates="user")
@@ -46,17 +56,15 @@ class Report(Base):
     __tablename__ = "reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    # Nullable until Firebase Auth lands in Sprint 2. Sprint 1 has no sign-in,
-    # so an upload cannot be attributed to a user yet; reports are stored
-    # unclaimed and re-linked once `users.firebase_uid` exists. Every other
-    # table keeps a required user_id because nothing writes to it before auth.
+    # Nullable so rows uploaded before sign-in still load. New uploads set this
+    # from the verified Supabase user. A missing owner is treated as not found.
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     image_path = Column(String, nullable=True)
     original_text = Column(Text, nullable=True)
     simplified_text = Column(Text, nullable=True)
     ocr_confidence = Column(Float, nullable=True)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
-    processed_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=utc_now)
+    processed_at = Column(DateTime, default=utc_now)
 
     user = relationship("User", back_populates="reports")
 
@@ -82,7 +90,7 @@ class WellnessLog(Base):
     log_type = Column(String, nullable=False)
     value = Column(Float, nullable=False)
     target = Column(Float, nullable=True)
-    logged_at = Column(DateTime, default=datetime.utcnow)
+    logged_at = Column(DateTime, default=utc_now)
 
     user = relationship("User", back_populates="wellness_logs")
 
@@ -93,7 +101,7 @@ class QRSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     expires_at = Column(DateTime, nullable=False)
     revoked = Column(Boolean, default=False)
 

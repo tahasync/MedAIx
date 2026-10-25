@@ -72,7 +72,7 @@ connections.
 3. repo-root `.env.local` (where `neon link` / `neon env pull` write)
 4. `sqlite:///./medaix.db` — the last-resort fallback
 
-Store report images and medicine photos in Firebase Storage, not Postgres —
+Store report images and medicine photos in Supabase Storage, not Postgres —
 Neon's free tier is 0.5 GB and structured rows are what belong there.
 
 ### Which database is production actually using?
@@ -106,7 +106,7 @@ Render → `medaix-api` → **Environment** → *Add Environment Variable*:
 
 | Key | Value |
 | --- | --- |
-| `NEON_DATABASE_URL` | `postgresql://neondb_owner:<password>@ep-rough-heart-b3am3e5t-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` |
+| `NEON_DATABASE_URL` | `postgresql://<user>:<password>@<endpoint>-pooler.<region>.aws.neon.tech/<database>?sslmode=require` (copy it from the Neon console → *Connection string*, pooled) |
 
 Use the **pooled** host (`-pooler`), never the direct one. Save, then redeploy —
 Render only applies env changes on a new deploy.

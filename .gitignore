@@ -24,6 +24,8 @@ app/.dart_tool/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
 app/build/
+# Gradle writes its problems report here, outside app/build/.
+app/android/build/
 app/.packages
 app/.pub-cache/
 app/.pub/

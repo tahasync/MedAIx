@@ -6,11 +6,16 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import androidx.core.content.ContextCompat
 
 class MainActivity : FlutterActivity() {
+    // The emulator's graphics stack drops Flutter's separate surface and
+    // leaves a black window. Texture mode paints in the normal view.
+    override fun getRenderMode(): RenderMode = RenderMode.texture
+
     private val cameraPermissionRequestCode = 9217
     private var cameraPermissionResult: MethodChannel.Result? = null
 
