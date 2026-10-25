@@ -50,17 +50,55 @@ if not SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine_kwargs.update(pool_pre_ping=True, pool_recycle=1800)
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# expire_on_commit=False: a request reads back the row it just wrote (the new
+# report id, the simplified text) and sessions are request-scoped, so there is
+# no later writer to be stale against. The default would silently issue one
+# more SELECT per committed object. Against Neon that is ~100 ms per request.
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+    bind=engine,
+)
 Base = declarative_base()
 
 
 def get_db():
-    """FastAPI dependency yielding a scoped session."""
+    """FastAPI dependency yielding one session for the whole request.
+
+    The auth dependency and the route handler both depend on this, and FastAPI
+    resolves a dependency once per request, so they share the session and the
+    connection. Opening a second session per request cost an extra pool
+    checkout (``pool_pre_ping`` SELECT) and an extra ROLLBACK on return: two
+    network round trips on every authenticated call.
+    """
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def rename_legacy_user_uid() -> None:
+    """Rename an older ``users.firebase_uid`` column to ``supabase_uid``.
+
+    ``create_all`` does not alter an existing column. Local databases created
+    before Supabase Auth still have ``firebase_uid``, and queries against
+    ``supabase_uid`` would fail until the name is updated.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if not inspector.has_table("users"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    if "firebase_uid" in columns and "supabase_uid" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE users RENAME COLUMN firebase_uid TO supabase_uid"
+                )
+            )
 
 
 def warn_if_ephemeral() -> None:

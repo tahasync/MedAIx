@@ -146,9 +146,20 @@ jobs:
       - name: Build release APK
         # GITHUB_OUTPUT is line-delimited KEY=value; expanding it unquoted splits
         # the value on whitespace so URLs survive intact.
+        # SUPABASE_URL is the public project URL. The publishable anon key comes
+        # from the SUPABASE_ANON_KEY secret so it is not stored in the repo.
+        # API_BASE_URL stays the production URL from the repository variable.
+        env:
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_ANON_KEY secret is not set."
+            exit 1
+          fi
           flutter build apk --release \
-            --dart-define=API_BASE_URL=${{ steps.api.outputs.base_url }}
+            --dart-define=API_BASE_URL=${{ steps.api.outputs.base_url }} \
+            --dart-define=SUPABASE_URL=https://fmjcifnrwbazdlrhklta.supabase.co \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 
       - name: Verify APK identity and signing state
         run: |

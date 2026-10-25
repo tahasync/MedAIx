@@ -1,31 +1,55 @@
 """MedAIx API entrypoint.
 
 `/health` is the route the keep-alive ping hits, so it must stay cheap and
-dependency-free. Feature endpoints land in their own sprint — Sprint 1 adds
-`/upload-report`.
+dependency-free. Feature endpoints land in their own sprint: Sprint 1 added
+`/upload-report`; Sprint 2 added `/simplify-report`, `/reports`, and
+`/profile`.
 """
 
 import io
 import logging
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
+from auth import get_current_user
 from database import (
     SQLALCHEMY_DATABASE_URL,
     Base,
-    SessionLocal,
     engine,
+    get_db,
+    rename_legacy_user_uid,
     warn_if_ephemeral,
 )
-from models import Medicine, QRSession, Report, User, WellnessLog  # noqa: F401
+from models import (  # noqa: F401
+    Medicine,
+    QRSession,
+    Report,
+    User,
+    WellnessLog,
+    utc_now,
+)
 from ocr import OcrLanguage, OcrResult, OcrUnavailableError, extract_text
+from profile import (
+    ProfileUpdate,
+    profile_error_message,
+    profile_payload,
+)
+from pydantic import ValidationError
+from simplify import SimplifyResult, simplify_text
 
 logger = logging.getLogger(__name__)
 
+CurrentUser = Annotated[User, Depends(get_current_user)]
+# The same session the auth dependency used: one connection per request.
+DbSession = Annotated[Session, Depends(get_db)]
+
+rename_legacy_user_uid()
 Base.metadata.create_all(bind=engine)
 warn_if_ephemeral()
 
@@ -129,6 +153,8 @@ def _first_page_image(payload: bytes) -> Image.Image:
 
 @app.post("/upload-report")
 async def upload_report(
+    user: CurrentUser,
+    db: DbSession,
     file: Annotated[UploadFile, File(description="Lab report image or PDF")],
     language: Annotated[
         OcrLanguage,
@@ -175,21 +201,16 @@ async def upload_report(
         )
 
     report = Report(
+        user_id=user.id,
         original_text=result.text,
         ocr_confidence=result.confidence,
         image_path=file.filename,
     )
-    session = SessionLocal()
-    try:
-        session.add(report)
-        session.commit()
-        session.refresh(report)
-        report_id = report.id
-    finally:
-        session.close()
+    db.add(report)
+    db.commit()
 
     return {
-        "id": report_id,
+        "id": report.id,
         "text": result.text,
         "language": language.value,
         "confidence": result.confidence,
@@ -197,3 +218,148 @@ async def upload_report(
         "height": result.height,
         "skew_corrected_degrees": result.skew_degrees,
     }
+
+
+@app.post("/simplify-report")
+def simplify_report(
+    user: CurrentUser,
+    db: DbSession,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Simplify a stored report's OCR text into plain language.
+
+    Body: ``{"report_id": <int>}``.
+
+    Idempotent: if the report was already simplified, the stored
+    ``simplified_text`` is returned without re-running the pipeline, so the
+    client uses this same call to *view* a previous simplification. The
+    simplification rewrites medical jargon only -- numbers, units, and
+    reference ranges are left verbatim so a result cannot be misread.
+    """
+    report_id = payload.get("report_id")
+    if not isinstance(report_id, int) or isinstance(report_id, bool):
+        raise HTTPException(
+            status_code=422,
+            detail="Please send a valid report id (a whole number).",
+        )
+
+    report = db.get(Report, report_id)
+    if report is None or report.user_id != user.id:
+        raise HTTPException(
+            status_code=404,
+            detail="I can't find that report. Please upload it again first.",
+        )
+    if not report.original_text:
+        raise HTTPException(
+            status_code=422,
+            detail="That report has no readable text to simplify.",
+        )
+
+    # Return a previous simplification instead of redoing the work.
+    if report.simplified_text:
+        return {
+            "id": report.id,
+            "original_text": report.original_text,
+            "simplified_text": report.simplified_text,
+            "terms_simplified": None,
+            "sentence_count": None,
+            "note": "Previously simplified.",
+        }
+
+    result: SimplifyResult = simplify_text(report.original_text)
+
+    report.simplified_text = result.simplified_text
+    report.processed_at = utc_now()
+    db.commit()
+
+    return {
+        "id": report.id,
+        "original_text": report.original_text,
+        "simplified_text": result.simplified_text,
+        "terms_simplified": result.terms_simplified,
+        "sentence_count": result.sentence_count,
+        "note": result.note,
+    }
+
+
+@app.get("/reports")
+def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
+    """List the signed-in user's reports, newest first.
+
+    Selects only the summary columns. Loading whole rows pulled every report's
+    OCR text and simplified text (a few KB each) across the wire just to answer
+    "is there a simplified version?".
+    """
+    rows = (
+        db.query(
+            Report.id,
+            Report.uploaded_at,
+            Report.ocr_confidence,
+            Report.image_path,
+            func.coalesce(func.length(Report.simplified_text), 0),
+        )
+        .filter(Report.user_id == user.id)
+        .order_by(Report.uploaded_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": report_id,
+            "uploaded_at": uploaded_at.isoformat(),
+            "confidence": confidence,
+            "has_simplified": simplified_length > 0,
+            "image_path": image_path,
+        }
+        for report_id, uploaded_at, confidence, image_path, simplified_length in rows
+    ]
+
+
+@app.get("/profile")
+def read_profile(user: CurrentUser) -> dict[str, object]:
+    """Return the signed-in patient's profile, including whether onboarding is done."""
+    return profile_payload(user)
+
+
+@app.put("/profile")
+def update_profile(
+    user: CurrentUser,
+    db: DbSession,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Create or replace the profile answers collected during onboarding."""
+    try:
+        update = ProfileUpdate.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=profile_error_message(exc),
+        ) from exc
+
+    # ``user`` is attached to this request's session, so write to it directly.
+    user.name = update.name
+    user.age = update.age
+    user.weight = update.weight
+    user.height = update.height
+    user.sex = update.sex
+    user.conditions = update.conditions
+    user.medications = update.medications
+    user.allergies = update.allergies
+    db.commit()
+    return profile_payload(user)
+
+
+@app.delete("/profile")
+def delete_profile(user: CurrentUser, db: DbSession) -> dict[str, bool]:
+    """Delete this patient's MedAIx profile and the reports stored for them.
+
+    The Supabase sign-in remains. The next request creates a blank profile,
+    so onboarding runs again.
+    """
+    db.query(Report).filter(Report.user_id == user.id).delete()
+    db.query(Medicine).filter(Medicine.user_id == user.id).delete()
+    db.query(WellnessLog).filter(WellnessLog.user_id == user.id).delete()
+    db.query(QRSession).filter(QRSession.user_id == user.id).delete()
+    db.delete(user)
+    db.commit()
+    return {"deleted": True}
+

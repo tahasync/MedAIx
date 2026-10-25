@@ -1,12 +1,11 @@
-/// Report upload screen — Sprint 1.
+/// Report upload screen (Sprint 1), with the Sprint 2 hand-off.
 ///
 /// Implements empty, loading, error, and success states, with camera and file
 /// entry points feeding the same language-aware OCR request.
 ///
-/// Plain-language simplification is Sprint 2, so success stops at "report
-/// processed" and shows the raw read. That is deliberate: it keeps OCR
-/// accuracy measurable in isolation instead of conflating it with the
-/// simplification step.
+/// Success shows the raw read so OCR accuracy stays measurable on its own,
+/// then offers "Simplify this report" as the next step, which runs the
+/// Sprint 2 `/simplify-report` call and opens the plain-language view.
 library;
 
 import 'package:file_picker/file_picker.dart';
@@ -17,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'api_client.dart';
 import 'providers.dart';
+import 'simplify_screen.dart';
 import 'theme.dart';
 
 class UploadReportScreen extends ConsumerStatefulWidget {
@@ -557,6 +557,14 @@ class _SuccessView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final semantics = theme.extension<AppSemanticColors>()!;
+    final simplifyState = ref.watch(simplifyControllerProvider);
+    final simplifying = simplifyState is SimplifyInProgress;
+    final simplifyFailure = switch (simplifyState) {
+      SimplifyFailure(reportId: final id) && final failure
+          when id == result.id =>
+        failure,
+      _ => null,
+    };
 
     return Center(
       child: SingleChildScrollView(
@@ -580,7 +588,8 @@ class _SuccessView extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Text extracted. Check it against your original report.',
+                'Text extracted and saved to your reports. Check it against '
+                'the original, then rewrite it in plain language.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -646,12 +655,23 @@ class _SuccessView extends ConsumerWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      SelectableText(
-                        result.text,
-                        style: theme.textTheme.bodyMedium,
-                        textDirection: result.language == 'urdu'
-                            ? TextDirection.rtl
-                            : TextDirection.ltr,
+                      // A full-page lab report yields a long transcript. Cap
+                      // the card so "Simplify this report" stays on screen;
+                      // the text scrolls inside the card.
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: (MediaQuery.sizeOf(context).height * 0.38)
+                              .clamp(160.0, 420.0),
+                        ),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            result.text,
+                            style: theme.textTheme.bodyMedium,
+                            textDirection: result.language == 'urdu'
+                                ? TextDirection.rtl
+                                : TextDirection.ltr,
+                          ),
+                        ),
                       ),
                       const Divider(height: 32),
                       Row(
@@ -682,9 +702,59 @@ class _SuccessView extends ConsumerWidget {
                   ),
                 ),
               ),
+              if (simplifyFailure != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: semantics.errorContainer,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: semantics.error.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: semantics.error),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          simplifyFailure.message,
+                          style: TextStyle(color: semantics.onErrorContainer),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: ref.read(uploadControllerProvider.notifier).reset,
+                onPressed: simplifying
+                    ? null
+                    : () => simplifyAndShow(context, ref, result.id),
+                icon: simplifying
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome_outlined),
+                label: Text(
+                  simplifying
+                      ? 'Simplifying'
+                      : simplifyFailure != null
+                      ? 'Try again'
+                      : 'Simplify this report',
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: simplifying
+                    ? null
+                    : () {
+                        ref.read(simplifyControllerProvider.notifier).reset();
+                        ref.read(uploadControllerProvider.notifier).reset();
+                      },
                 icon: const Icon(Icons.add),
                 label: const Text('Upload another'),
               ),

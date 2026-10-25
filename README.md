@@ -5,9 +5,12 @@ it into plain language → track it against a patient profile → flag risk tren
 check drug interactions → scan medicine packaging → recommend a specialist →
 share a curated view with a doctor via time-limited QR.
 
-> **Status: Sprint 1 — report upload and OCR.** The app can extract report text
-> using English, Urdu script, or Roman Urdu modes. Later clinical features are
-> still planned. See [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
+> **Status: Sprint 2 — NLP simplification + profile storage. COMPLETE.**
+> Sign in (Supabase Auth: Google or email), answer a three-step onboarding
+> questionnaire, scan a report in English, Urdu script, or Roman Urdu, then
+> rewrite its medical terms in plain language and keep a per-user report
+> history. Risk/trend analysis (Sprint 3) is next. See
+> [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
 
 ## Live
 
@@ -27,6 +30,7 @@ ephemeral disk and data will be lost on restart.
 |---|---|
 | Frontend | Flutter + Riverpod |
 | Backend | FastAPI + SQLAlchemy |
+| Auth | Supabase Auth (Google + email); API verifies the JWT against the project JWKS |
 | Database | Neon Postgres (pooled) |
 | Hosting | Render free web service |
 | CI/CD | GitHub Actions |
@@ -71,6 +75,16 @@ cd api
 - Swagger: <http://localhost:8000/docs>
 - Tests: `uv run pytest -v`
 
+Endpoints other than `/health` require `Authorization: Bearer <Supabase access
+token>`. See [`api/.env.example`](api/.env.example) for `SUPABASE_URL`.
+
+| Route | Sprint | Purpose |
+|---|---|---|
+| `POST /upload-report` | 1 | OCR a report image/PDF, store the raw text |
+| `POST /simplify-report` | 2 | Rewrite medical terms in plain language (idempotent) |
+| `GET /reports` | 2 | The signed-in user's reports, newest first |
+| `GET/PUT/DELETE /profile` | 2 | Onboarding answers and profile CRUD |
+
 On Linux, install the OCR binaries and language data with `apt-get`; see
 [`api/README.md`](api/README.md#ocr-language-data) for local and Render setup.
 
@@ -81,8 +95,13 @@ Requires Flutter.
 ```bash
 cd app
 flutter pub get
-flutter run --dart-define=API_BASE_URL=http://localhost:8000
+flutter run --dart-define=API_BASE_URL=http://localhost:8000 \
+  --dart-define=SUPABASE_ANON_KEY=<publishable key>
 ```
+
+On Windows with the Android emulator, `run-pixel4.bat` (emulator with host
+GPU), `run-backend.bat` (API on `0.0.0.0:8000`), and `run-app.bat` (reads the
+Supabase key from `api/.env` and targets `10.0.2.2:8000`) do this for you.
 
 ### Database
 

@@ -28,6 +28,8 @@ dependencies = [
     # PDF reports: render page 1 to an image, then run the same image path.
     "pypdf>=5.1.0",
     "python-multipart>=0.0.20",
+    # Verifies Supabase access tokens (ES256) against the project JWKS.
+    "pyjwt[crypto]>=2.10.0",
 ]
 
 [dependency-groups]
