@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .tessdata/
@@ -11,6 +12,9 @@ __pycache__/
 .env.*
 *.log
 tests/
+samples/
+*.ps1
+README.md
 _*.py
 _*.txt
 _*.bat
