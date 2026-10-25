@@ -5,6 +5,8 @@ on:
     paths:
       - 'app/**'
       - '.github/workflows/app-build-sprint.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
       - 'app/**'
@@ -21,6 +23,8 @@ jobs:
     defaults:
       run:
         working-directory: ./app
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -59,3 +63,14 @@ jobs:
           name: app-debug-sprint3.apk
           path: app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7
+
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MedAIx ${{ github.ref_name }}
+          body: |
+            MedAIx Android APK build.
+            Download the APK below and install it on your Android device.
+          files: build/app/outputs/flutter-apk/app-debug.apk
+          fail_on_unmatched_files: true

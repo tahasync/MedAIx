@@ -157,6 +157,7 @@ jobs:
             exit 1
           fi
           flutter build apk --release \
+            --dart-define=MEDAIX_SPRINT=3 \
             --dart-define=API_BASE_URL=${{ steps.api.outputs.base_url }} \
             --dart-define=SUPABASE_URL=https://fmjcifnrwbazdlrhklta.supabase.co \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
