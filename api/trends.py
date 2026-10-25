@@ -347,6 +347,7 @@ _SKIP_CANDIDATE = re.compile(
     r"patient|phone|mrn|\blab\s*id\b|\bage\b|\bsex\b|\bdate\b|\bpage\b",
     re.IGNORECASE,
 )
+_MISSING_VALUE = re.compile(r"(?:--+|—+|…+|\.{3,}|n/?a)\s*$", re.IGNORECASE)
 
 
 def guess_panel_title(text: str, values: list[ParsedValue] | None = None) -> str:
@@ -380,9 +381,21 @@ def _candidate_count(text: str) -> int:
         if _SKIP_CANDIDATE.search(line):
             continue
         cleaned = _TIME.sub(" ", _DATE.sub(" ", line))
-        if _NUMBER.search(cleaned):
+        if _NUMBER.search(cleaned) or _is_missing_lab_value(cleaned):
             count += 1
     return count
+
+
+def _is_missing_lab_value(line: str) -> bool:
+    """Count a recognized result row whose value OCR marked as missing."""
+    missing = _MISSING_VALUE.search(line)
+    if missing is None:
+        return False
+    marker = line[: missing.start()].strip(" :;,.-–—=|*#()[]")
+    normalized = marker.lower()
+    return any(name in normalized for name in _CBC) or any(
+        pattern.search(marker) for pattern, _ in _SYNONYMS
+    )
 
 
 def summarise_report(text: str, sex: str | None = None) -> dict[str, object]:
