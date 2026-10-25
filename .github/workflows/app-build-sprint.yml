@@ -42,7 +42,7 @@ jobs:
         run: flutter pub get
 
       - name: Accept Android SDK licenses
-        run: yes | flutter doctor --android-licenses
+        run: echo y | flutter doctor --android-licenses
 
       - name: Build debug APK with Sprint 3 flag
         run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=3
