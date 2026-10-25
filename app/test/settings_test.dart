@@ -225,7 +225,7 @@ void main() {
       expect(find.text('70 kg'), findsOneWidget);
       expect(find.text('Diabetes'), findsOneWidget);
       expect(find.text('Peanuts'), findsOneWidget);
-      expect(find.text('1'), findsOneWidget);
+      expect(find.textContaining('· 30'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Edit details'), findsOneWidget);
     });
 
@@ -246,12 +246,11 @@ void main() {
       expect(find.text('Details saved'), findsNothing);
 
       await tester.enterText(find.byKey(const Key('profile-name')), 'Ada');
-      await tester.enterText(find.byKey(const Key('profile-age')), '31');
       await _tapButton(tester, 'Save details');
 
       expect(find.text('Details saved'), findsOneWidget);
       expect(find.byKey(const Key('profile-name')), findsNothing);
-      expect(find.text('31'), findsOneWidget);
+      expect(find.text('Ada'), findsOneWidget);
     });
 
     testWidgets('Cancel returns to read mode without saving', (tester) async {
@@ -261,11 +260,15 @@ void main() {
 
       await _tapButton(tester, 'Edit details');
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('profile-age')), '99');
+      await tester.enterText(
+        find.byKey(const Key('profile-name')),
+        'Unsaved name',
+      );
       await _tapText(tester, 'Cancel');
 
-      // After cancel, the age reverts to the mock default
-      expect(find.text('99'), findsNothing);
+      // Cancel leaves the stored name unchanged.
+      expect(find.text('Test'), findsOneWidget);
+      expect(find.text('Unsaved name'), findsNothing);
     });
 
     testWidgets('fits a 320 dp screen in edit mode', (tester) async {

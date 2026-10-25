@@ -5,8 +5,6 @@ on:
     paths:
       - 'app/**'
       - '.github/workflows/app-build-sprint.yml'
-    tags:
-      - 'v*'
   pull_request:
     paths:
       - 'app/**'
@@ -17,15 +15,15 @@ concurrency:
   group: app-build-sprint-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./app
-    permissions:
-      contents: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +41,13 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test --no-pub
 
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses
@@ -63,14 +67,3 @@ jobs:
           name: app-debug-sprint3.apk
           path: app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7
-
-      - name: Create GitHub Release and Upload APK
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: MedAIx ${{ github.ref_name }}
-          body: |
-            MedAIx Android APK build.
-            Download the APK below and install it on your Android device.
-          files: build/app/outputs/flutter-apk/app-debug.apk
-          fail_on_unmatched_files: true

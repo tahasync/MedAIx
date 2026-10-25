@@ -4,11 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/router.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'package:intl/intl.dart';
-
-void main() {
-  setUpAll(() async {
-    Intl.defaultLocale = 'en_US';
-  });
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/reports/data/report_models.dart';
@@ -27,6 +22,10 @@ Future<void> pumpAt(
 }
 
 void main() {
+  setUpAll(() async {
+    Intl.defaultLocale = 'en_US';
+  });
+
   group('Reports list', () {
     testWidgets('renders every report with its status', (tester) async {
       await pumpAt(tester, AppRoutes.reports);
@@ -114,7 +113,7 @@ void main() {
       await pumpAt(tester, AppRoutes.report(3));
 
       expect(find.text('Blood test'), findsOneWidget);
-      expect(find.text('18 Oct 2026 · Lab report'), findsOneWidget);
+      expect(find.text('18 Oct 2026 · Blood test'), findsOneWidget);
       expect(find.text('In plain words'), findsOneWidget);
       expect(
         find.textContaining('Your blood sugar average is slightly high.'),
@@ -243,7 +242,7 @@ void main() {
       expect(find.text('HbA1c'), findsOneWidget);
       expect(find.text('Fasting glucose'), findsOneWidget);
       expect(find.text('LDL'), findsOneWidget);
-      expect(find.textContaining('Latest'), findsOneWidget);
+      expect(find.textContaining('Latest 6.4 %'), findsOneWidget);
       expect(find.text('Borderline'), findsOneWidget);
       expect(find.text('Normal'), findsNWidgets(2));
     });
@@ -258,7 +257,7 @@ void main() {
       expect(find.text('LDL trend'), findsOneWidget);
       expect(find.text('3 reports · Mar to Oct'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.tap(find.byTooltip('Back'));
       await tester.pumpAndSettle();
       expect(find.text('Trends'), findsOneWidget);
       expect(find.text('All values'), findsOneWidget);

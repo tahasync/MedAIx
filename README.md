@@ -49,6 +49,7 @@ Zero paid infrastructure.
 └── .github/workflows/
     ├── api-deploy.yml   on api/**  — tests, then Render deploy hook
     ├── app-build.yml    on app/**  — builds + signs the APK
+    ├── app-build-sprint.yml — validates app/** and builds the Sprint 3 debug APK artifact
     └── keep-alive.yml   cron */10  — keeps the free instance awake
 ```
 
