@@ -41,11 +41,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Enable Android SDK
-        run: |
-          chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34"
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "build-tools;34.0.0"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 34
+          constructs: buildtools;34.0.0
 
       - name: Build debug APK with Sprint 3 flag
         run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=3
