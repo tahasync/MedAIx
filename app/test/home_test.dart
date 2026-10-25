@@ -2,12 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
-import 'package:intl/intl.dart';
-
-void main() {
-  setUpAll(() async {
-    Intl.defaultLocale = 'en_US';
-  });
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/home/providers/home_providers.dart';
@@ -16,6 +10,10 @@ import 'package:tahasync_medaix/features/home/ui/home_screen.dart';
 import 'support/test_app.dart';
 
 void main() {
+  setUpAll(() async {
+    Intl.defaultLocale = 'en_US';
+  });
+
   testWidgets('greets by name with a time-of-day subtitle', (tester) async {
     await usePhone(tester);
     await tester.pumpWidget(testApp());
@@ -116,8 +114,8 @@ void main() {
     await tester.tap(find.textContaining('Blood test'));
     await tester.pumpAndSettle();
     expect(find.text('In plain words'), findsOneWidget);
-    // Date format may vary by locale; match the report identifier instead of exact date
-    expect(find.text('Lab report'), findsOneWidget);
+    // The fake report title appears in the header subtitle with its date.
+    expect(find.text('18 Oct 2026 · Blood test'), findsOneWidget);
   });
 
   testWidgets('with no reports the latest section is an empty state', (

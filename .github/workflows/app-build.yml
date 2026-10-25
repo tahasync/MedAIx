@@ -2,10 +2,10 @@ name: App Build
 
 on:
   push:
-    paths:
-      - 'app/**'
-      - '.github/workflows/app-build.yml'
-  pull_request:
+    branches:
+      - main
+    tags:
+      - 'v*'
     paths:
       - 'app/**'
       - '.github/workflows/app-build.yml'
@@ -15,16 +15,16 @@ concurrency:
   group: app-build-${{ github.ref }}
   cancel-in-progress: true
 
-# The release step (softprops/action-gh-release) creates a GitHub Release and
-# uploads the APK asset, which writes repository contents. The default
-# GITHUB_TOKEN is read-only for contents, so without this the release step fails
-# with "Resource not accessible by integration" even though the APK built fine.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      slug: ${{ steps.version.outputs.slug }}
     defaults:
       run:
         working-directory: ./app
@@ -46,7 +46,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Resolve signing availability
         # Secrets are not exposed to `if:` expressions, so probe through env.
@@ -65,11 +65,13 @@ jobs:
           fi
 
       - name: Fail fast when release signing is required
-        # Guards the main branch: shipping a debug-signed artifact to users
-        # under the MedAIx name is worse than failing the build.
+        # Every non-PR build from main, a release tag, or a manual run must
+        # have production signing configured. Never publish a debug-signed APK.
         if: >-
           steps.signing.outputs.available != 'true'
-          && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+          && (github.ref == 'refs/heads/main'
+              || startsWith(github.ref, 'refs/tags/')
+              || github.event_name == 'workflow_dispatch')
         run: |
           echo "::error::Release signing secrets are not configured. Set"
           echo "::error::ANDROID_SIGNING_KEY, ANDROID_KEYSTORE_PASSWORD,"
@@ -131,7 +133,6 @@ jobs:
         # Injected at compile time: providers.dart reads API_BASE_URL via
         # String.fromEnvironment. Failing here is much better than shipping an
         # APK whose default base URL is http://localhost:8000.
-        id: api
         env:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
         run: |
@@ -140,16 +141,14 @@ jobs:
             echo "::error::your Render URL, e.g. https://medaix-api.onrender.com"
             exit 1
           fi
-          echo "base_url=$API_BASE_URL" >> "$GITHUB_OUTPUT"
           echo "Building against $API_BASE_URL"
 
       - name: Build release APK
-        # GITHUB_OUTPUT is line-delimited KEY=value; expanding it unquoted splits
-        # the value on whitespace so URLs survive intact.
-        # SUPABASE_URL is the public project URL. The publishable anon key comes
-        # from the SUPABASE_ANON_KEY secret so it is not stored in the repo.
-        # API_BASE_URL stays the production URL from the repository variable.
+        # Pass repository configuration through the environment so it is not
+        # interpolated into shell source. SUPABASE_URL is public; its anon key
+        # comes from the SUPABASE_ANON_KEY secret.
         env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           if [ -z "$SUPABASE_ANON_KEY" ]; then
@@ -158,7 +157,7 @@ jobs:
           fi
           flutter build apk --release \
             --dart-define=MEDAIX_SPRINT=3 \
-            --dart-define=API_BASE_URL=${{ steps.api.outputs.base_url }} \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=SUPABASE_URL=https://fmjcifnrwbazdlrhklta.supabase.co \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 
@@ -207,22 +206,29 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Attach APK to GitHub Release
-        # Branch and PR builds publish a run artifact only. When the build is
-        # triggered by a tag push, also publish the APK as a release asset so it
-        # appears under Releases, not just on the Actions run. Creates the
-        # release if the tag has none yet; an existing release just gains the
-        # asset. Guarded by the tag ref so main/PR builds never open a release.
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: app/${{ steps.version.outputs.slug }}.apk
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Clean up signing material
         # Never leave key material in the workspace after the build.
         if: always()
         run: rm -f android/key.properties android/app/keystore.jks
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.slug }}.apk
+          path: dist
+
+      - name: Attach APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/${{ needs.build.outputs.slug }}.apk
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

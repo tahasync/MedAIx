@@ -336,8 +336,15 @@ void main() {
       ]) {
         final String src = File(path).readAsStringSync();
         // Strip XML comments before checking to avoid false positives
-        final String srcNoComments = src.replaceAll(RegExp(r'<!--.*?-->'), '');
-        expect(srcNoComments.toLowerCase(), isNot(contains('gradient')), reason: path);
+        final String srcNoComments = src.replaceAll(
+          RegExp(r'<!--.*?-->', dotAll: true),
+          '',
+        );
+        expect(
+          srcNoComments.toLowerCase(),
+          isNot(contains('gradient')),
+          reason: path,
+        );
       }
       expect(
         File('android/app/src/main/res/values/colors.xml').readAsStringSync(),
