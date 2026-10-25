@@ -592,6 +592,69 @@ class ApiClient {
     fallback: 'Could not load your trends. Please try again.',
     timeout: timeout,
   );
+
+  /// `GET /wellness/log` for the phone's local calendar day.
+  Future<Map<String, dynamic>> fetchWellnessDay({
+    required DateTime day,
+    required int timezoneOffsetMinutes,
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    final String localDate =
+        '${day.year.toString().padLeft(4, '0')}-'
+        '${day.month.toString().padLeft(2, '0')}-'
+        '${day.day.toString().padLeft(2, '0')}';
+    return getJson(
+      '/wellness/log?day=$localDate&timezone_offset_minutes=$timezoneOffsetMinutes',
+      fallback: 'Could not load today’s habit log. Please try again.',
+      timeout: timeout,
+    );
+  }
+
+  /// `POST /wellness/log`. Entries carry a client id so an offline replay is
+  /// safe even if the server saved a request whose response was lost.
+  Future<Map<String, dynamic>> createWellnessLog(
+    Map<String, Object?> entry, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    const String fallback =
+        'Could not save this habit entry. Please try again.';
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('$baseUrl/wellness/log'),
+            headers: _authorized({'Content-Type': 'application/json'}),
+            body: jsonEncode(entry),
+          )
+          .timeout(timeout);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final Object? body = jsonDecode(response.body);
+        if (body is Map<String, dynamic>) return body;
+        throw const FormatException('Expected a JSON object.');
+      }
+      throw ApiException(
+        _detailFrom(response, fallback: fallback),
+        statusCode: response.statusCode,
+      );
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException(fallback);
+    } on SocketException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on http.ClientException catch (error) {
+      throw ApiException('Could not reach the MedAIx service.', error: error);
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The connection to MedAIx was interrupted.',
+        error: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        'The service returned an unexpected response.',
+        error: error,
+      );
+    }
+  }
 }
 
 /// Result of a successful `/upload-report` call.

@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/repositories.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../home/providers/home_providers.dart';
 import '../../reports/data/reports_repository.dart';
+import '../../wellness/providers/wellness_providers.dart';
 import '../data/profile_repository.dart';
 
 /// Signed-in patient's profile. Refetches when the session changes.
@@ -41,7 +43,10 @@ class ProfileEditor extends Notifier<AsyncValue<void>> {
     state = const AsyncLoading();
     try {
       await ref.read(profileRepositoryProvider).delete();
+      await ref.read(wellnessRepositoryProvider).clearLocal();
       ref.invalidate(profileProvider);
+      ref.invalidate(wellnessProvider);
+      ref.invalidate(habitTodayProvider);
       state = const AsyncData(null);
       return true;
     } on RepositoryException catch (error, stack) {

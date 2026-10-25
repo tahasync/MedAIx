@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/connectivity.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
+import '../../home/providers/home_providers.dart';
 import '../data/wellness_repository.dart';
 import '../providers/wellness_providers.dart';
 
@@ -22,6 +24,7 @@ class WellnessScreen extends ConsumerWidget {
         .read(wellnessProvider.notifier)
         .addWater(kWaterStepMl);
     if (ok == null || !context.mounted) return;
+    ref.invalidate(habitTodayProvider);
     showToast(
       context,
       ok
@@ -33,11 +36,29 @@ class WellnessScreen extends ConsumerWidget {
   Future<void> _logWalk(BuildContext context, WidgetRef ref) async {
     final bool? ok = await ref
         .read(wellnessProvider.notifier)
-        .logExercise('Walk');
+        .logExercise('Walk', minutes: 10);
     if (ok == null || !context.mounted) return;
+    ref.invalidate(habitTodayProvider);
     showToast(
       context,
       ok ? 'Walk logged' : 'Couldn’t log your walk. Today’s log is unchanged.',
+    );
+  }
+
+  Future<void> _logSteps(BuildContext context, WidgetRef ref) async {
+    final int? steps = await showDialog<int>(
+      context: context,
+      builder: (_) => const _LogStepsDialog(),
+    );
+    if (steps == null || !context.mounted) return;
+    final bool? ok = await ref.read(wellnessProvider.notifier).addSteps(steps);
+    if (ok == null || !context.mounted) return;
+    ref.invalidate(habitTodayProvider);
+    showToast(
+      context,
+      ok
+          ? 'Added ${formatThousands(steps)} steps'
+          : 'Couldn’t log steps. Today’s log is unchanged.',
     );
   }
 
@@ -45,6 +66,8 @@ class WellnessScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<WellnessDay> day = ref.watch(wellnessProvider);
     final WellnessDay? value = day.valueOrNull;
+    final bool deviceOffline =
+        ref.watch(isOfflineProvider).valueOrNull ?? false;
 
     return AppScaffold(
       body: AppScreen(
@@ -70,24 +93,31 @@ class WellnessScreen extends ConsumerWidget {
                 error,
                 'We couldn’t reach your habit log.',
               ),
-              dataSafety: 'Today’s log is saved on this device.',
+              dataSafety: 'Unsynced entries stay saved on this device.',
               onPrimary: () => ref.read(wellnessProvider.notifier).refresh(),
             ),
           ],
           data: (d) => [
+            if (deviceOffline || d.isOffline || d.pendingSyncCount > 0)
+              OfflineBanner(
+                message: d.pendingSyncCount > 0
+                    ? '${d.pendingSyncCount} ${d.pendingSyncCount == 1 ? 'entry is' : 'entries are'} '
+                          'saved on this device and will sync when you’re back online.'
+                    : 'You’re offline. Your saved log is shown; new entries will sync when you’re back online.',
+              ),
             _HabitCard(
               icon: LucideIcons.droplet,
               title: 'Water',
-              subtitle: '${d.waterMl} / ${d.waterGoalMl} ml',
-              progress: d.waterProgress,
+              subtitle: d.waterGoalMl == null
+                  ? '${d.waterMl} ml logged · ${d.waterGoalNote}'
+                  : '${d.waterMl} / ${d.waterGoalMl} ml · ${d.waterGoalNote}',
+              progress: d.waterGoalMl == null ? null : d.waterProgress,
               progressLabel: 'Water progress',
               trailing: AppIconButton(
                 icon: LucideIcons.plus,
                 label: 'Add $kWaterStepMl ml',
                 onCard: true,
-                onPressed: d.waterMl >= d.waterGoalMl
-                    ? null
-                    : () => _addWater(context, ref),
+                onPressed: () => _addWater(context, ref),
               ),
             ),
             const SizedBox(height: AppSpace.cardGap),
@@ -97,7 +127,13 @@ class WellnessScreen extends ConsumerWidget {
               subtitle:
                   '${formatThousands(d.steps)} / ${formatThousands(d.stepGoal)}'
                   ' · ${d.stepGoalNote}',
-              progress: d.stepProgress,
+              trailing: AppIconButton(
+                icon: LucideIcons.plus,
+                label: 'Log steps',
+                onCard: true,
+                onPressed: () => _logSteps(context, ref),
+              ),
+              progress: d.stepGoal > 0 ? d.stepProgress : null,
               progressLabel: 'Step progress',
             ),
             const SizedBox(height: AppSpace.cardGap),
@@ -111,13 +147,88 @@ class WellnessScreen extends ConsumerWidget {
                       compact: true,
                       onPressed: () => _logWalk(context, ref),
                     )
-                  : const StatusLabel(status: ValueStatus.ok, text: 'Logged'),
+                  : StatusLabel(
+                      status: ValueStatus.ok,
+                      text: d.exerciseMinutes > 0
+                          ? 'Logged · ${d.exerciseMinutes} min'
+                          : 'Logged',
+                    ),
+            ),
+            const SizedBox(height: AppSpace.cardGap),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const CardTag(
+                    icon: LucideIcons.lightbulb,
+                    label: 'Today’s tip',
+                  ),
+                  Text(
+                    d.dailyTip,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+class _LogStepsDialog extends StatefulWidget {
+  const _LogStepsDialog();
+
+  @override
+  State<_LogStepsDialog> createState() => _LogStepsDialogState();
+}
+
+class _LogStepsDialogState extends State<_LogStepsDialog> {
+  final TextEditingController _input = TextEditingController();
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Log steps'),
+    content: TextField(
+      controller: _input,
+      autofocus: true,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(
+        labelText: 'Steps to add',
+        hintText: 'For example, 1200',
+        errorText: _validationError,
+      ),
+    ),
+    actions: [
+      GhostButton(
+        label: 'Cancel',
+        compact: true,
+        onPressed: () => Navigator.pop(context),
+      ),
+      PrimaryButton(
+        label: 'Log steps',
+        compact: true,
+        onPressed: () {
+          final int? value = int.tryParse(_input.text.trim());
+          if (value == null || value < 1 || value > 50000) {
+            setState(
+              () => _validationError = 'Enter a number from 1 to 50,000.',
+            );
+            return;
+          }
+          Navigator.pop(context, value);
+        },
+      ),
+    ],
+  );
 }
 
 /// Mockup habit card: icon tile, bold title, muted small subtitle, optional

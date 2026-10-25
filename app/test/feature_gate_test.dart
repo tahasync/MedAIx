@@ -10,11 +10,11 @@ import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'support/test_app.dart';
 
 void main() {
-  test('this build is Sprint 3: trends on, later epics off', () {
+  test('this build is Sprint 4: trends and wellness on, later epics off', () {
     const FeatureFlags f = FeatureFlags(kBuildSprint);
-    expect(kBuildSprint, 3);
+    expect(kBuildSprint, 4);
     expect(f.trends, isTrue);
-    expect(f.wellness, isFalse);
+    expect(f.wellness, isTrue);
     expect(f.meds, isFalse);
     expect(f.scan, isFalse);
     expect(f.doctorMatch, isFalse);
@@ -48,7 +48,7 @@ void main() {
     expect(find.text('Reports'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
     expect(find.text('Meds'), findsNothing);
-    expect(find.text('Wellness'), findsNothing);
+    expect(find.text('Wellness'), findsOneWidget);
   });
 
   testWidgets('Home offers upload and trends, no later-sprint tiles', (
@@ -65,7 +65,7 @@ void main() {
     expect(find.text('Check medicines'), findsNothing);
     expect(find.text('Scan medicine'), findsNothing);
     expect(find.text('Find a doctor'), findsNothing);
-    expect(find.textContaining('Habit score'), findsNothing);
+    expect(find.textContaining('Habit score'), findsOneWidget);
     expect(find.bySemanticsLabel('Reminders'), findsNothing);
   });
 
