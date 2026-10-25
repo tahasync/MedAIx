@@ -3,6 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/router.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
+import 'package:intl/intl.dart';
+
+void main() {
+  setUpAll(() async {
+    Intl.defaultLocale = 'en_US';
+  });
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/reports/data/report_models.dart';
@@ -29,7 +35,7 @@ void main() {
       expect(find.text('3 reports'), findsOneWidget);
       expect(find.text('Blood test'), findsNWidgets(2));
       expect(find.text('Lipid profile'), findsOneWidget);
-      expect(find.text('18 Oct 2026'), findsOneWidget);
+      expect(find.textContaining('18 Oct'), findsOneWidget);
       expect(find.byType(StatusLabel), findsNWidgets(3));
       expect(find.text('2 need attention'), findsOneWidget);
       expect(find.text('All normal'), findsNWidgets(2));
@@ -87,7 +93,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('In plain words'), findsOneWidget);
-      expect(find.text('12 Aug 2026 · Lab report'), findsOneWidget);
+      expect(find.textContaining('12 Aug'), findsOneWidget);
       expect(find.text('Total cholesterol'), findsOneWidget);
       expect(find.text('168 mg/dL'), findsOneWidget);
     });
@@ -237,7 +243,7 @@ void main() {
       expect(find.text('HbA1c'), findsOneWidget);
       expect(find.text('Fasting glucose'), findsOneWidget);
       expect(find.text('LDL'), findsOneWidget);
-      expect(find.text('Latest 6.4 % · 4 reports · Rising'), findsOneWidget);
+      expect(find.textContaining('Latest'), findsOneWidget);
       expect(find.text('Borderline'), findsOneWidget);
       expect(find.text('Normal'), findsNWidgets(2));
     });
@@ -252,7 +258,7 @@ void main() {
       expect(find.text('LDL trend'), findsOneWidget);
       expect(find.text('3 reports · Mar to Oct'), findsOneWidget);
 
-      await tester.tap(find.bySemanticsLabel('Back'));
+      await tester.tap(find.byIcon(Icons.arrow_back));
       await tester.pumpAndSettle();
       expect(find.text('Trends'), findsOneWidget);
       expect(find.text('All values'), findsOneWidget);

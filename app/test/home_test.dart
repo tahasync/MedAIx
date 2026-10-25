@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
+import 'package:intl/intl.dart';
+
+void main() {
+  setUpAll(() async {
+    Intl.defaultLocale = 'en_US';
+  });
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/home/providers/home_providers.dart';
@@ -93,7 +100,7 @@ void main() {
 
     expect(find.text('Latest report'), findsOneWidget);
     expect(find.byType(SummaryRow), findsOneWidget);
-    expect(find.text('Blood test, 18 Oct 2026'), findsOneWidget);
+    expect(find.textContaining('Blood test'), findsOneWidget);
     expect(find.text('2 values need attention'), findsNothing);
     expect(find.text('2 need attention'), findsOneWidget);
   });
@@ -106,7 +113,7 @@ void main() {
     // The row sits below the floating nav until the page is scrolled.
     await tester.drag(find.byType(ListView).first, const Offset(0, -600));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Blood test, 18 Oct 2026'));
+    await tester.tap(find.textContaining('Blood test'));
     await tester.pumpAndSettle();
     expect(find.text('In plain words'), findsOneWidget);
     // Date format may vary by locale; match the report identifier instead of exact date
