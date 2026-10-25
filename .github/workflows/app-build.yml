@@ -6,6 +6,7 @@ on:
       - main
     tags:
       - 'v*'
+      - 'Sprint-3-Wk-5-6-Risk-Trend-Analysis-EP-02-PB-03-US-03'
     paths:
       - 'app/**'
       - '.github/workflows/app-build.yml'
