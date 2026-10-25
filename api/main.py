@@ -8,9 +8,10 @@ dependency-free. Feature endpoints land in their own sprint: Sprint 1 added
 
 import io
 import logging
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader
@@ -21,6 +22,7 @@ from auth import get_current_user
 from database import (
     SQLALCHEMY_DATABASE_URL,
     Base,
+    add_missing_wellness_columns,
     add_missing_user_columns,
     engine,
     get_db,
@@ -43,7 +45,7 @@ from profile import (
     profile_error_message,
     profile_payload,
 )
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from simplify import SimplifyResult, simplify_text
 from trends import build_risk_trends, summarise_report
 
@@ -58,6 +60,7 @@ Base.metadata.create_all(bind=engine)
 # create_all never alters an existing table, so columns added since the
 # database was created (the Sprint 3 questionnaire) are bolted on here.
 add_missing_user_columns()
+add_missing_wellness_columns()
 warn_if_ephemeral()
 
 # 12 MB. A 12MP phone photo is ~4 MB as JPEG; PDFs of lab reports sit well under
@@ -451,6 +454,240 @@ def delete_profile(user: CurrentUser, db: DbSession) -> dict[str, bool]:
     clear_health_data(user)
     db.commit()
     return {"deleted": True}
+
+
+class WellnessLogInput(BaseModel):
+    """One offline-safe, idempotent wellness entry from the signed-in user."""
+
+    client_id: str = Field(min_length=1, max_length=80)
+    type: str = Field(pattern=r"^(water|steps|exercise)$")
+    value: int = Field(gt=0)
+    label: str | None = Field(default=None, max_length=40)
+    occurred_at: datetime | None = None
+    timezone_offset_minutes: int = Field(default=0, ge=-840, le=840)
+
+    @model_validator(mode="after")
+    def validate_entry(self) -> "WellnessLogInput":
+        self.client_id = self.client_id.strip()
+        if not self.client_id:
+            raise ValueError("Missing entry id.")
+        maximum = {"water": 2000, "steps": 50000, "exercise": 480}[self.type]
+        if self.value > maximum:
+            raise ValueError("Entry is above the allowed amount.")
+        if self.type == "exercise":
+            self.label = (self.label or "Exercise").strip() or "Exercise"
+        elif self.label is not None:
+            raise ValueError("Labels are only used for exercise entries.")
+        if self.occurred_at is not None and self.occurred_at.tzinfo is None:
+            raise ValueError("Entry time must include a timezone.")
+        return self
+
+
+_FLUID_RESTRICTION_TERMS = (
+    "kidney disease",
+    "chronic kidney",
+    "renal disease",
+    "dialysis",
+    "heart failure",
+    "cirrhosis",
+    "liver failure",
+    "hyponatremia",
+    "fluid restriction",
+)
+
+
+def _wellness_goals(user: User) -> tuple[int | None, str, int, str]:
+    """Return cautious starting estimates, never individualized prescriptions."""
+    conditions = (user.conditions or "").lower()
+    fluid_limited = any(term in conditions for term in _FLUID_RESTRICTION_TERMS)
+    if fluid_limited:
+        water_goal = None
+        water_note = "Follow your clinician’s fluid limit; no estimate is shown."
+    elif user.weight is not None and user.weight > 0:
+        # A capped tracking estimate from the saved profile weight. It is not a
+        # clinical fluid prescription; people with fluid restrictions are
+        # excluded above and shown their clinician's plan instead.
+        water_goal = round(user.weight * 30 / 50) * 50
+        water_goal = int(max(1200, min(3600, water_goal)))
+        water_note = "A starting estimate based on your saved weight."
+    else:
+        water_goal = 2100
+        water_note = "A general starting estimate; add your weight for a tailored estimate."
+
+    mobility_limited_terms = (
+        "arthritis",
+        "chronic pain",
+        "mobility",
+        "copd",
+        "heart failure",
+    )
+    if any(term in conditions for term in mobility_limited_terms):
+        step_goal = 4000
+        step_note = "A lower starting goal based on your saved condition."
+    elif conditions.strip():
+        step_goal = 5000
+        step_note = "A starting goal based on your saved condition."
+    else:
+        step_goal = 6000
+        step_note = "A general starting goal."
+    return water_goal, water_note, step_goal, step_note
+
+
+def _wellness_tip(
+    *,
+    water_ml: int,
+    water_goal_ml: int | None,
+    steps: int,
+    step_goal: int,
+    exercise_label: str | None,
+) -> str:
+    """Local retrieval stub for short, non-diagnostic habit suggestions."""
+    # Sprint 4 keeps the tip corpus on-device with the API: deterministic
+    # retrieval, no external model call and no diagnosis or treatment advice.
+    if water_goal_ml is None:
+        return "Follow the fluid guidance your clinician or care team gave you."
+    if water_ml < water_goal_ml:
+        return "Log drinks as you have them to keep today’s estimate up to date."
+    if exercise_label is None:
+        return "A short, comfortable walk can count as movement; follow your care plan."
+    if steps < step_goal:
+        return "A few short walks can add steps through the day if that feels comfortable."
+    return "You’ve logged today’s habits. Keep choosing what feels comfortable for you."
+
+
+def _wellness_day(
+    db: Session,
+    user: User,
+    *,
+    day: date,
+    timezone_offset_minutes: int,
+) -> dict[str, object]:
+    local_start = datetime.combine(day, time.min) - timedelta(
+        minutes=timezone_offset_minutes
+    )
+    local_end = local_start + timedelta(days=1)
+    logs = (
+        db.query(WellnessLog)
+        .filter(
+            WellnessLog.user_id == user.id,
+            WellnessLog.logged_at >= local_start,
+            WellnessLog.logged_at < local_end,
+        )
+        .order_by(WellnessLog.logged_at, WellnessLog.id)
+        .all()
+    )
+    water_ml = int(sum(log.value for log in logs if log.log_type == "water"))
+    steps = int(sum(log.value for log in logs if log.log_type == "steps"))
+    exercises = [log for log in logs if log.log_type == "exercise"]
+    exercise_minutes = int(sum(log.value for log in exercises))
+    exercise_label = exercises[-1].label if exercises else None
+    water_goal, water_note, step_goal, step_note = _wellness_goals(user)
+    return {
+        "date": day.isoformat(),
+        "water_ml": water_ml,
+        "water_goal_ml": water_goal,
+        "water_goal_note": water_note,
+        "steps": steps,
+        "step_goal": step_goal,
+        "step_goal_note": step_note,
+        "exercise_label": exercise_label,
+        "exercise_minutes": exercise_minutes,
+        "daily_tip": _wellness_tip(
+            water_ml=water_ml,
+            water_goal_ml=water_goal,
+            steps=steps,
+            step_goal=step_goal,
+            exercise_label=exercise_label,
+        ),
+    }
+
+
+@app.get("/wellness/log")
+def read_wellness_log(
+    user: CurrentUser,
+    db: DbSession,
+    day: date | None = None,
+    timezone_offset_minutes: Annotated[int, Query(ge=-840, le=840)] = 0,
+) -> dict[str, object]:
+    """Return this user's daily totals, profile-based starting goals and tip."""
+    selected_day = day or utc_now().date()
+    if selected_day > utc_now().date() + timedelta(days=1):
+        raise HTTPException(status_code=422, detail="Choose today or an earlier day.")
+    if selected_day < utc_now().date() - timedelta(days=90):
+        raise HTTPException(status_code=422, detail="That day is too far in the past.")
+    return _wellness_day(
+        db,
+        user,
+        day=selected_day,
+        timezone_offset_minutes=timezone_offset_minutes,
+    )
+
+
+@app.post("/wellness/log")
+def create_wellness_log(
+    payload: dict[str, object],
+    user: CurrentUser,
+    db: DbSession,
+) -> dict[str, object]:
+    """Save one water, step or exercise entry and return refreshed daily totals."""
+    try:
+        entry = WellnessLogInput.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Check the habit entry and try again.",
+        ) from exc
+
+    now = utc_now()
+    happened = (
+        entry.occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if entry.occurred_at is not None
+        else now
+    )
+    if happened > now + timedelta(minutes=5) or happened < now - timedelta(days=90):
+        raise HTTPException(
+            status_code=422,
+            detail="Log an entry from the last 90 days.",
+        )
+
+    existing = (
+        db.query(WellnessLog)
+        .filter(
+            WellnessLog.user_id == user.id,
+            WellnessLog.client_id == entry.client_id,
+        )
+        .one_or_none()
+    )
+    if existing is None:
+        water_goal, _, step_goal, _ = _wellness_goals(user)
+        target = (
+            water_goal
+            if entry.type == "water"
+            else step_goal
+            if entry.type == "steps"
+            else None
+        )
+        log = WellnessLog(
+            user_id=user.id,
+            log_type=entry.type,
+            value=entry.value,
+            target=target,
+            label=entry.label,
+            client_id=entry.client_id,
+            logged_at=happened,
+        )
+        db.add(log)
+        db.commit()
+
+    local_day = (
+        happened + timedelta(minutes=entry.timezone_offset_minutes)
+    ).date()
+    return _wellness_day(
+        db,
+        user,
+        day=local_day,
+        timezone_offset_minutes=entry.timezone_offset_minutes,
+    )
 
 
 @app.get("/risk-trends")

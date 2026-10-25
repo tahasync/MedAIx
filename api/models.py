@@ -14,6 +14,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     String,
     Text,
 )
@@ -117,7 +118,15 @@ class WellnessLog(Base):
     log_type = Column(String, nullable=False)
     value = Column(Float, nullable=False)
     target = Column(Float, nullable=True)
+    label = Column(String, nullable=True)
+    # Client-generated id makes offline replay safe after an ambiguous timeout.
+    client_id = Column(String, nullable=True)
     logged_at = Column(DateTime, default=utc_now)
+
+    __table_args__ = (
+        Index("uq_wellness_logs_user_client_id", "user_id", "client_id", unique=True),
+        Index("ix_wellness_logs_user_logged_at", "user_id", "logged_at"),
+    )
 
     user = relationship("User", back_populates="wellness_logs")
 

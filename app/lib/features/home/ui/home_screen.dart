@@ -134,8 +134,12 @@ class HomeScreen extends ConsumerWidget {
                   key: ValueKey<String>('habits-loading'),
                   height: 100,
                 ),
-                error: (_, _) => const SizedBox.shrink(
-                  key: ValueKey<String>('habits-error'),
+                error: (_, _) => ErrorCard(
+                  key: const ValueKey<String>('habits-error'),
+                  title: 'Couldn’t load your habit score',
+                  message: 'Try refreshing today’s habit log.',
+                  dataSafety: 'Your saved habit entries are safe.',
+                  onPrimary: () => ref.invalidate(habitTodayProvider),
                 ),
                 data: (day) =>
                     _HabitCard(key: const ValueKey<String>('habits'), day: day),

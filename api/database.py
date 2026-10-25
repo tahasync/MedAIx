@@ -139,6 +139,23 @@ def add_missing_user_columns(bind=None) -> list[str]:
     return added
 
 
+def add_missing_wellness_columns(bind=None) -> list[str]:
+    """Add Sprint 4 wellness fields to databases created by older releases."""
+    from sqlalchemy import inspect
+
+    from models import WellnessLog
+
+    target = bind if bind is not None else engine
+    if not inspect(target).has_table(WellnessLog.__tablename__):
+        return []
+    added = _add_missing_columns(WellnessLog, target)
+    # Existing installations already have the table, so create_all cannot
+    # create its indexes while adding the new nullable idempotency column.
+    for index in WellnessLog.__table__.indexes:
+        index.create(target, checkfirst=True)
+    return added
+
+
 def _add_missing_columns(model: type, bind=None) -> list[str]:
     from sqlalchemy import inspect, text
 

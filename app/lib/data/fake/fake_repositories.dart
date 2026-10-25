@@ -138,16 +138,38 @@ class FakeWellnessRepository implements WellnessRepository {
   @override
   Future<WellnessDay> addWater(int ml) async {
     await Future<void>.delayed(latency);
-    final int next = (_day.waterMl + ml).clamp(0, _day.waterGoalMl);
+    final int next = _day.waterMl + ml;
     _day = _day.copyWith(waterMl: next);
     return _day;
   }
 
   @override
-  Future<WellnessDay> logExercise(String label) async {
+  Future<WellnessDay> addSteps(int steps) async {
     await Future<void>.delayed(latency);
-    _day = _day.copyWith(exerciseLabel: label);
+    _day = _day.copyWith(steps: _day.steps + steps);
     return _day;
+  }
+
+  @override
+  Future<WellnessDay> logExercise(String label, {int minutes = 10}) async {
+    await Future<void>.delayed(latency);
+    _day = _day.copyWith(
+      exerciseLabel: label,
+      exerciseMinutes: _day.exerciseMinutes + minutes,
+    );
+    return _day;
+  }
+
+  @override
+  Future<void> clearLocal() async {
+    _day = const WellnessDay(
+      waterMl: 0,
+      waterGoalMl: 2400,
+      steps: 0,
+      stepGoal: 6000,
+      exerciseLabel: null,
+      stepGoalNote: 'general starting goal',
+    );
   }
 }
 

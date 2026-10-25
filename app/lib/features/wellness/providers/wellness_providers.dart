@@ -28,8 +28,10 @@ class WellnessController extends AsyncNotifier<WellnessDay> {
 
   Future<bool?> addWater(int ml) => _mutate((repo) => repo.addWater(ml));
 
-  Future<bool?> logExercise(String label) =>
-      _mutate((repo) => repo.logExercise(label));
+  Future<bool?> addSteps(int steps) => _mutate((repo) => repo.addSteps(steps));
+
+  Future<bool?> logExercise(String label, {int minutes = 10}) =>
+      _mutate((repo) => repo.logExercise(label, minutes: minutes));
 
   Future<bool?> _mutate(
     Future<WellnessDay> Function(WellnessRepository repo) action,

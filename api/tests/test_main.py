@@ -953,6 +953,48 @@ def test_add_missing_user_columns_without_table_is_a_no_op(tmp_path) -> None:
     assert database.add_missing_user_columns(bind=empty) == []
 
 
+def test_add_missing_wellness_columns_upgrades_legacy_table(tmp_path) -> None:
+    """An earlier WellnessLog table gains exercise and offline fields."""
+    legacy = create_engine(f"sqlite:///{tmp_path / 'legacy-wellness.db'}")
+    with legacy.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE wellness_logs ("
+                "id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, "
+                "log_type VARCHAR NOT NULL, value FLOAT NOT NULL, "
+                "target FLOAT, logged_at TIMESTAMP)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO wellness_logs (user_id, log_type, value) "
+                "VALUES (1, 'water', 250)"
+            )
+        )
+
+    added = database.add_missing_wellness_columns(bind=legacy)
+
+    assert set(added) == {"label", "client_id"}
+    columns = {
+        column["name"] for column in inspect(legacy).get_columns("wellness_logs")
+    }
+    assert {"label", "client_id"} <= columns
+    indexes = {index["name"] for index in inspect(legacy).get_indexes("wellness_logs")}
+    assert "uq_wellness_logs_user_client_id" in indexes
+    assert "ix_wellness_logs_user_logged_at" in indexes
+    with legacy.connect() as connection:
+        assert connection.execute(
+            text("SELECT log_type, value FROM wellness_logs")
+        ).one() == ("water", 250.0)
+    assert database.add_missing_wellness_columns(bind=legacy) == []
+
+
+def test_add_missing_wellness_columns_without_table_is_a_no_op(tmp_path) -> None:
+    empty = create_engine(f"sqlite:///{tmp_path / 'empty-wellness.db'}")
+
+    assert database.add_missing_wellness_columns(bind=empty) == []
+
+
 # ---- Sprint 3: /risk-trends ----
 
 

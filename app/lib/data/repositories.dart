@@ -20,6 +20,7 @@ import '../features/reports/data/reports_repository.dart';
 import '../features/settings/data/settings_repository.dart';
 import '../features/share/data/share_repository.dart';
 import '../features/wellness/data/wellness_repository.dart';
+import '../features/wellness/data/api_wellness_repository.dart';
 import 'api/api_client.dart';
 import 'api/api_insights_repository.dart';
 import 'api/api_repositories.dart';
@@ -65,9 +66,14 @@ final medsRepositoryProvider = Provider<MedsRepository>(
   (ref) => FakeMedsRepository(),
 );
 
-final wellnessRepositoryProvider = Provider<WellnessRepository>(
-  (ref) => FakeWellnessRepository(),
-);
+final wellnessRepositoryProvider = Provider<WellnessRepository>((ref) {
+  if (kUseFakeData) return FakeWellnessRepository();
+  final AuthSession? session = ref.watch(authControllerProvider);
+  return ApiWellnessRepository(
+    ref.watch(apiClientProvider),
+    userId: session?.userId ?? 'signed-out',
+  );
+});
 
 final shareRepositoryProvider = Provider<ShareRepository>(
   (ref) => FakeShareRepository(),
