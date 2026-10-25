@@ -5,11 +5,13 @@ Runs against an isolated SQLite file so a local `medaix.db` is never touched.
 
 import io
 import os
+from datetime import date, datetime
 
 import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_medaix.db")
@@ -35,7 +37,8 @@ import simplify as simplify_module  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from database import SessionLocal, get_db  # noqa: E402
 from main import app  # noqa: E402
-from models import Report, User  # noqa: E402
+from models import Report, User, utc_now  # noqa: E402
+from profile import CONSENT_VERSION  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -581,8 +584,17 @@ def test_reports_are_private_to_the_signed_in_user(client: TestClient) -> None:
     assert denied.status_code == 404
 
 
+def _dob(years_ago: int) -> str:
+    """ISO date of someone who turned ``years_ago`` a month ago."""
+    today = date.today()
+    month = today.month - 1 or 12
+    year = today.year - years_ago - (1 if today.month == 1 else 0)
+    return date(year, month, 1).isoformat()
+
+
 def test_profile_crud_removes_reports_on_delete(client: TestClient) -> None:
     """Create, read, update, and delete the signed-in profile."""
+    assert client.delete("/profile").status_code == 200
     created = client.get("/profile")
     assert created.status_code == 200
     assert created.json()["onboarding_complete"] is False
@@ -591,10 +603,11 @@ def test_profile_crud_removes_reports_on_delete(client: TestClient) -> None:
         "/profile",
         json={
             "name": "  Faizan  ",
-            "age": 28,
-            "weight": 72.5,
-            "height": 175,
-            "sex": "Male",
+            "date_of_birth": _dob(28),
+            "sex_at_birth": "Male",
+            "consent": {"terms": True, "health_data": True},
+            "weight_kg": 72.5,
+            "height_cm": 175,
             "conditions": "Asthma",
             "medications": "",
             "allergies": "Peanuts",
@@ -603,7 +616,12 @@ def test_profile_crud_removes_reports_on_delete(client: TestClient) -> None:
     assert saved.status_code == 200
     body = saved.json()
     assert body["name"] == "Faizan"
+    assert body["sex_at_birth"] == "male"
     assert body["sex"] == "male"
+    assert body["age"] == 28
+    assert body["weight_kg"] == 72.5
+    assert body["weight"] == 72.5
+    assert body["height_cm"] == 175
     assert body["conditions"] == "Asthma"
     assert body["onboarding_complete"] is True
 
@@ -635,10 +653,12 @@ def test_profile_crud_removes_reports_on_delete(client: TestClient) -> None:
     fresh = client.get("/profile")
     assert fresh.status_code == 200
     assert fresh.json()["onboarding_complete"] is False
-    # A blank profile, not the old one: SQLite may reuse the deleted row id,
-    # so the reset is checked through the fields rather than the id.
-    assert fresh.json()["name"] is None
+    # The account survives (name stays); every health answer is gone.
+    assert fresh.json()["name"] == "Faizan"
     assert fresh.json()["allergies"] == ""
+    assert fresh.json()["date_of_birth"] is None
+    assert fresh.json()["sex_at_birth"] is None
+    assert fresh.json()["weight_kg"] is None
     assert client.get("/reports").json() == []
 
 
@@ -650,3 +670,433 @@ def test_profile_rejects_an_impossible_age(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert "age" in response.json()["detail"].lower()
+
+
+# ---- Sprint 3: questionnaire profile ----
+
+
+def _consented_profile(client: TestClient, **extra: object) -> dict[str, object]:
+    """Reset the test user and store the required sign-up answers."""
+    assert client.delete("/profile").status_code == 200
+    payload: dict[str, object] = {
+        "name": "Muhammad",
+        "date_of_birth": "1990-05-14",
+        "sex_at_birth": "female",
+        "consent": {"terms": True, "health_data": True},
+    }
+    payload.update(extra)
+    response = client.put("/profile", json=payload)
+    assert response.status_code == 200, response.json()
+    return response.json()
+
+
+def test_profile_payload_matches_the_contract_shape(client: TestClient) -> None:
+    body = _consented_profile(
+        client,
+        conditions="Diabetes, Hypertension",
+        allergies="Penicillin",
+        takes_medicines=True,
+        medications="Metformin 500 mg, Amlodipine",
+        first_goal="reports",
+        height_cm=172,
+        weight_kg=68,
+    )
+
+    assert set(body) == {
+        "id",
+        "name",
+        "email",
+        "date_of_birth",
+        "age",
+        "sex_at_birth",
+        "consent",
+        "conditions",
+        "allergies",
+        "takes_medicines",
+        "medications",
+        "pregnancy_status",
+        "prostate_urinary_issue",
+        "first_goal",
+        "height_cm",
+        "weight_kg",
+        "weight",
+        "height",
+        "sex",
+        "onboarding_complete",
+    }
+    assert body["date_of_birth"] == "1990-05-14"
+    assert body["age"] == (date.today().year - 1990) - (1 if (date.today().month, date.today().day) < (5, 14) else 0)
+    assert body["email"] is None
+    assert body["takes_medicines"] is True
+    assert body["first_goal"] == "reports"
+    assert body["height_cm"] == 172.0
+    assert body["onboarding_complete"] is True
+
+
+def test_profile_partial_update_keeps_other_fields(client: TestClient) -> None:
+    _consented_profile(client, conditions="Asthma", weight_kg=70)
+
+    response = client.put("/profile", json={"allergies": "Peanuts"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["allergies"] == "Peanuts"
+    assert body["conditions"] == "Asthma"
+    assert body["weight_kg"] == 70.0
+    assert body["name"] == "Muhammad"
+    assert body["onboarding_complete"] is True
+
+
+def test_profile_onboarding_needs_name_dob_sex_and_consent(client: TestClient) -> None:
+    assert client.delete("/profile").status_code == 200
+    client.put("/profile", json={"name": None})
+
+    step = client.put("/profile", json={"name": "Muhammad", "date_of_birth": "1990-05-14"})
+    assert step.json()["onboarding_complete"] is False
+
+    step = client.put("/profile", json={"sex_at_birth": "prefer not to say"})
+    assert step.json()["sex_at_birth"] == "prefer_not_to_say"
+    assert step.json()["onboarding_complete"] is False
+
+    step = client.put("/profile", json={"consent": {"terms": True}})
+    assert step.json()["consent"] is None
+    assert step.json()["onboarding_complete"] is False
+
+    step = client.put("/profile", json={"consent": {"health_data": True}})
+    assert step.json()["consent"]["terms"] is True
+    assert step.json()["onboarding_complete"] is True
+
+
+def test_profile_rejects_under_18_and_stores_nothing(client: TestClient) -> None:
+    _consented_profile(client, name="Muhammad")
+
+    response = client.put(
+        "/profile",
+        json={"name": "Teenager", "date_of_birth": _dob(16), "weight_kg": 50},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "MedAIx is for adults. A parent or guardian can use it for you."
+    )
+    stored = client.get("/profile").json()
+    assert stored["name"] == "Muhammad"
+    assert stored["date_of_birth"] == "1990-05-14"
+    assert stored["weight_kg"] is None
+
+
+def test_profile_accepts_someone_who_turned_18_recently(client: TestClient) -> None:
+    response = client.put("/profile", json={"date_of_birth": _dob(18)})
+
+    assert response.status_code == 200
+    assert response.json()["age"] == 18
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"name": "A"}, "Use a name between 2 and 60 characters."),
+        ({"name": "x" * 61}, "Use a name between 2 and 60 characters."),
+        ({"date_of_birth": "2999-01-01"}, "Enter a date of birth in the past."),
+        ({"date_of_birth": "1899-12-31"}, "Enter a date of birth after 1900."),
+        ({"date_of_birth": "yesterday"}, "Enter your date of birth as a date (YYYY-MM-DD)."),
+        ({"height_cm": 49}, "Enter a height in centimetres, from 50 to 250."),
+        ({"height_cm": 251}, "Enter a height in centimetres, from 50 to 250."),
+        ({"weight_kg": 1}, "Enter a weight in kilograms, from 2 to 400."),
+        ({"weight_kg": 401}, "Enter a weight in kilograms, from 2 to 400."),
+        ({"sex_at_birth": "unknown"}, "Choose female, male, or prefer not to say."),
+        ({"first_goal": "sleep"}, "Choose reports, medicines, condition, or habits."),
+        ({"pregnancy_status": "maybe"}, "Choose no, pregnant, breastfeeding, or prefer not to say."),
+        ({"prostate_urinary_issue": "sometimes"}, "Choose no, yes, or prefer not to say."),
+        ({"takes_medicines": "sometimes"}, "Answer yes or no to whether you take regular medicines."),
+    ],
+)
+def test_profile_validation_messages(client: TestClient, payload: dict, message: str) -> None:
+    response = client.put("/profile", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == message
+
+
+def test_profile_consent_is_stamped_with_version_and_time(client: TestClient) -> None:
+    before = utc_now().replace(microsecond=0)
+
+    body = _consented_profile(client)
+
+    consent = body["consent"]
+    assert consent["terms"] is True
+    assert consent["health_data"] is True
+    assert consent["version"] == CONSENT_VERSION == "2026-10"
+    assert datetime.fromisoformat(consent["accepted_at"]) >= before
+
+
+def test_profile_consent_cannot_be_withdrawn_by_put(client: TestClient) -> None:
+    _consented_profile(client)
+
+    for payload in ({"terms": False}, {"health_data": False}, {"terms": True, "health_data": False}):
+        response = client.put("/profile", json={"consent": payload})
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "Consent can only be withdrawn by deleting your health data."
+        )
+
+    assert client.get("/profile").json()["consent"]["terms"] is True
+
+
+def test_profile_delete_clears_consent_and_health_answers(client: TestClient) -> None:
+    _consented_profile(client, conditions="Diabetes", takes_medicines=True, first_goal="habits")
+
+    assert client.delete("/profile").json() == {"deleted": True}
+
+    body = client.get("/profile").json()
+    assert body["consent"] is None
+    assert body["conditions"] == ""
+    assert body["takes_medicines"] is None
+    assert body["first_goal"] is None
+    assert body["date_of_birth"] is None
+    assert body["age"] is None
+    assert body["sex_at_birth"] is None
+    assert body["name"] == "Muhammad"
+    assert body["onboarding_complete"] is False
+
+
+def test_profile_pregnancy_status_only_for_female(client: TestClient) -> None:
+    female = _consented_profile(client, sex_at_birth="female", pregnancy_status="Breastfeeding")
+    assert female["pregnancy_status"] == "breastfeeding"
+
+    male = _consented_profile(client, sex_at_birth="male", pregnancy_status="pregnant")
+    assert male["pregnancy_status"] is None
+
+    # Changing group drops the answer that no longer applies.
+    _consented_profile(client, sex_at_birth="female", pregnancy_status="no")
+    switched = client.put("/profile", json={"sex_at_birth": "prefer_not_to_say"}).json()
+    assert switched["pregnancy_status"] is None
+
+
+def test_profile_prostate_question_only_for_men_over_40(client: TestClient) -> None:
+    older_man = _consented_profile(
+        client, sex_at_birth="male", date_of_birth=_dob(45), prostate_urinary_issue="Yes"
+    )
+    assert older_man["prostate_urinary_issue"] == "yes"
+
+    younger_man = _consented_profile(
+        client, sex_at_birth="male", date_of_birth=_dob(30), prostate_urinary_issue="yes"
+    )
+    assert younger_man["prostate_urinary_issue"] is None
+
+    woman = _consented_profile(
+        client, sex_at_birth="female", date_of_birth=_dob(45), prostate_urinary_issue="yes"
+    )
+    assert woman["prostate_urinary_issue"] is None
+
+
+def test_profile_accepts_legacy_keys(client: TestClient) -> None:
+    assert client.delete("/profile").status_code == 200
+
+    response = client.put(
+        "/profile",
+        json={"age": 52, "weight": 80, "height": 170, "sex": "other"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["age"] == 52  # no date of birth, so the legacy age is reported
+    assert body["weight_kg"] == 80.0 and body["weight"] == 80.0
+    assert body["height_cm"] == 170.0 and body["height"] == 170.0
+    assert body["sex_at_birth"] == "prefer_not_to_say"
+    assert body["sex"] == "prefer_not_to_say"
+    assert body["date_of_birth"] is None
+
+
+def test_add_missing_user_columns_upgrades_a_legacy_table(tmp_path) -> None:
+    """A users table from before Sprint 3 gains the new columns, idempotently."""
+    legacy = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with legacy.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, supabase_uid VARCHAR NOT NULL, "
+                "name VARCHAR, age INTEGER, weight FLOAT, height FLOAT, sex VARCHAR, "
+                "conditions TEXT, medications TEXT, allergies TEXT, created_at TIMESTAMP)"
+            )
+        )
+        connection.execute(text("INSERT INTO users (supabase_uid, name) VALUES ('u1', 'Old')"))
+
+    added = database.add_missing_user_columns(bind=legacy)
+
+    assert set(added) == {
+        "email",
+        "date_of_birth",
+        "sex_at_birth",
+        "consent_terms",
+        "consent_health_data",
+        "consent_version",
+        "consent_accepted_at",
+        "takes_medicines",
+        "pregnancy_status",
+        "prostate_urinary_issue",
+        "first_goal",
+    }
+    columns = {column["name"] for column in inspect(legacy).get_columns("users")}
+    assert set(added) <= columns
+    with legacy.connect() as connection:
+        row = connection.execute(
+            text("SELECT name, date_of_birth, consent_terms FROM users")
+        ).one()
+    assert row == ("Old", None, None)
+    assert database.add_missing_user_columns(bind=legacy) == []
+
+
+def test_add_missing_user_columns_without_table_is_a_no_op(tmp_path) -> None:
+    empty = create_engine(f"sqlite:///{tmp_path / 'empty.db'}")
+
+    assert database.add_missing_user_columns(bind=empty) == []
+
+
+# ---- Sprint 3: /risk-trends ----
+
+
+def _seed_reports(client: TestClient, texts: list[str]) -> list[int]:
+    owner_id = client.get("/profile").json()["id"]
+    session = SessionLocal()
+    try:
+        ids = []
+        for index, body in enumerate(texts):
+            report = Report(
+                user_id=owner_id,
+                original_text=body,
+                image_path=f"seed-{index}.png",
+                ocr_confidence=90,
+                uploaded_at=datetime(2026, 3 + 3 * index, 2, 9, 0),
+            )
+            session.add(report)
+            session.commit()
+            ids.append(report.id)
+        return ids
+    finally:
+        session.close()
+
+
+def test_risk_trends_flags_a_rising_hba1c_streak(client: TestClient) -> None:
+    _consented_profile(client, sex_at_birth="female", conditions="Diabetes")
+    ids = _seed_reports(
+        client,
+        [
+            "HbA1c 5.9 % 4.0-6.0\nHaemoglobin 13.1 g/dL",
+            "HbA1c 6.1 %\nHaemoglobin 13.0 g/dL",
+            "HbA1c 6.4 % 4.0 - 6.0\nHaemoglobin 13.2 g/dL",
+        ],
+    )
+
+    response = client.get("/risk-trends")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reports_count"] == 3
+    assert body["needs_reports"] is False
+    assert body["focus_markers"] == ["HbA1c", "Fasting glucose"]
+    assert body["insight"] == {
+        "marker": "HbA1c",
+        "title": "Your HbA1c has risen across 3 reports",
+        "body": "5.9 in March to 6.4 now. Worth raising with your doctor.",
+    }
+    hba1c, haemoglobin = body["trends"]
+    assert hba1c["marker"] == "HbA1c"
+    assert hba1c["focus"] is True
+    assert hba1c["range"]["source"] == "report"
+    assert hba1c["alert"]["code"] == "rising_streak"
+    assert hba1c["alert"]["level"] == "error"
+    assert [point["report_id"] for point in hba1c["points"]] == ids
+    assert [point["label"] for point in hba1c["points"]] == ["Mar", "Jun", "Sep"]
+    assert haemoglobin["marker"] == "Haemoglobin"
+    assert haemoglobin["range"] == {
+        "low": 12.0,
+        "high": 15.5,
+        "label": "Normal range 12.0–15.5 g/dL",
+        "source": "default",
+    }
+    assert haemoglobin["alert"] is None
+
+
+def test_risk_trends_needs_two_reports(client: TestClient) -> None:
+    _consented_profile(client)
+    _seed_reports(client, ["HbA1c 9.5 %"])
+
+    body = client.get("/risk-trends").json()
+
+    assert body["reports_count"] == 1
+    assert body["needs_reports"] is True
+    assert body["insight"] is None
+    assert [trend["marker"] for trend in body["trends"]] == ["HbA1c"]
+    assert body["trends"][0]["alert"] is None
+
+
+def test_risk_trends_is_private_to_the_signed_in_user(client: TestClient) -> None:
+    _consented_profile(client)
+    session = SessionLocal()
+    try:
+        other = session.query(User).filter(User.supabase_uid == "other-user").one_or_none()
+        if other is None:
+            other = User(supabase_uid="other-user")
+            session.add(other)
+            session.commit()
+        session.add(Report(user_id=other.id, original_text="HbA1c 9.9 %", ocr_confidence=90))
+        session.commit()
+    finally:
+        session.close()
+
+    body = client.get("/risk-trends").json()
+
+    assert body["reports_count"] == 0
+    assert body["trends"] == []
+
+
+def test_risk_trends_requires_sign_in(client: TestClient) -> None:
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert client.get("/risk-trends").status_code == 401
+
+
+def test_list_reports_uses_panel_title_not_letterhead(client: TestClient) -> None:
+    client.post(
+        "/upload-report",
+        files={"file": ("cbc.png", _lab_report_image(), "image/png")},
+    )
+
+    row = next(r for r in client.get("/reports").json() if r["image_path"] == "cbc.png")
+
+    assert row["title"] == "Complete blood count"
+    assert row["derived_title"] == "Complete blood count"
+    assert row["report_date"]
+    assert "attention_count" in row
+    assert row["title"] != "CITY LAB"
+
+
+def test_patient_can_rename_a_report(client: TestClient) -> None:
+    uploaded = client.post(
+        "/upload-report",
+        files={"file": ("cbc.png", _lab_report_image(), "image/png")},
+    ).json()
+
+    renamed = client.patch(f"/reports/{uploaded['id']}", json={"title": "My CBC"})
+    listed = next(r for r in client.get("/reports").json() if r["id"] == uploaded["id"])
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "My CBC"
+    assert listed["title"] == "My CBC"
+    assert listed["derived_title"] == "Complete blood count"
+
+
+def test_sign_in_copies_email_from_the_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auth as auth_module
+
+    app.dependency_overrides.pop(get_current_user, None)
+    monkeypatch.setattr(
+        auth_module,
+        "verify_access_token",
+        lambda _token: {"sub": "jwt-user", "email": "Ada@Example.com"},
+    )
+
+    body = client.get("/profile", headers={"Authorization": "Bearer fake"}).json()
+
+    assert body["email"] == "ada@example.com"

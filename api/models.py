@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -37,6 +38,11 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     supabase_uid = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    # Legacy Sprint 2 columns. ``weight`` is ``weight_kg`` and ``height`` is
+    # ``height_cm`` on the wire; ``sex`` mirrors ``sex_at_birth`` for rows
+    # written before the Sprint 3 questionnaire. ``age`` is only read when
+    # no ``date_of_birth`` is stored.
     age = Column(Integer, nullable=True)
     weight = Column(Float, nullable=True)
     height = Column(Float, nullable=True)
@@ -44,6 +50,18 @@ class User(Base):
     conditions = Column(Text, nullable=True)
     medications = Column(Text, nullable=True)
     allergies = Column(Text, nullable=True)
+    # Sprint 3 questionnaire (docs/questionnaire.md). New columns are added to
+    # existing tables by ``database.add_missing_user_columns`` at startup.
+    date_of_birth = Column(Date, nullable=True)
+    sex_at_birth = Column(String, nullable=True)
+    consent_terms = Column(Boolean, nullable=True)
+    consent_health_data = Column(Boolean, nullable=True)
+    consent_version = Column(String, nullable=True)
+    consent_accepted_at = Column(DateTime, nullable=True)
+    takes_medicines = Column(Boolean, nullable=True)
+    pregnancy_status = Column(String, nullable=True)
+    prostate_urinary_issue = Column(String, nullable=True)
+    first_goal = Column(String, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     reports = relationship("Report", back_populates="user")
@@ -63,6 +81,15 @@ class Report(Base):
     original_text = Column(Text, nullable=True)
     simplified_text = Column(Text, nullable=True)
     ocr_confidence = Column(Float, nullable=True)
+    # List title: user override, else derived from the detected panel (never
+    # the first OCR line — that is usually a letterhead or a patient name).
+    title = Column(String, nullable=True)
+    derived_title = Column(String, nullable=True)
+    report_date = Column(Date, nullable=True)
+    attention_count = Column(Integer, nullable=True)
+    values_read = Column(Integer, nullable=True)
+    values_expected = Column(Integer, nullable=True)
+    parse_note = Column(String, nullable=True)
     uploaded_at = Column(DateTime, default=utc_now)
     processed_at = Column(DateTime, default=utc_now)
 

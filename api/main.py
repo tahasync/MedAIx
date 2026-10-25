@@ -3,7 +3,7 @@
 `/health` is the route the keep-alive ping hits, so it must stay cheap and
 dependency-free. Feature endpoints land in their own sprint: Sprint 1 added
 `/upload-report`; Sprint 2 added `/simplify-report`, `/reports`, and
-`/profile`.
+`/profile`; Sprint 3 added `/risk-trends` and the questionnaire profile.
 """
 
 import io
@@ -21,6 +21,7 @@ from auth import get_current_user
 from database import (
     SQLALCHEMY_DATABASE_URL,
     Base,
+    add_missing_user_columns,
     engine,
     get_db,
     rename_legacy_user_uid,
@@ -37,11 +38,14 @@ from models import (  # noqa: F401
 from ocr import OcrLanguage, OcrResult, OcrUnavailableError, extract_text
 from profile import (
     ProfileUpdate,
+    apply_profile_update,
+    clear_health_data,
     profile_error_message,
     profile_payload,
 )
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from simplify import SimplifyResult, simplify_text
+from trends import build_risk_trends, summarise_report
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,9 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 rename_legacy_user_uid()
 Base.metadata.create_all(bind=engine)
+# create_all never alters an existing table, so columns added since the
+# database was created (the Sprint 3 questionnaire) are bolted on here.
+add_missing_user_columns()
 warn_if_ephemeral()
 
 # 12 MB. A 12MP phone photo is ~4 MB as JPEG; PDFs of lab reports sit well under
@@ -207,6 +214,8 @@ async def upload_report(
         image_path=file.filename,
     )
     db.add(report)
+    db.flush()
+    _stamp_report(report, user)
     db.commit()
 
     return {
@@ -217,6 +226,11 @@ async def upload_report(
         "width": result.width,
         "height": result.height,
         "skew_corrected_degrees": result.skew_degrees,
+        "title": report.title or report.derived_title,
+        "attention_count": report.attention_count,
+        "values_read": report.values_read,
+        "values_expected": report.values_expected,
+        "parse_note": report.parse_note,
     }
 
 
@@ -297,21 +311,99 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
             Report.ocr_confidence,
             Report.image_path,
             func.coalesce(func.length(Report.simplified_text), 0),
+            Report.title,
+            Report.derived_title,
+            Report.report_date,
+            Report.attention_count,
+            Report.values_read,
+            Report.values_expected,
+            Report.parse_note,
+            Report.original_text,
         )
         .filter(Report.user_id == user.id)
         .order_by(Report.uploaded_at.desc())
         .all()
     )
-    return [
-        {
-            "id": report_id,
-            "uploaded_at": uploaded_at.isoformat(),
-            "confidence": confidence,
-            "has_simplified": simplified_length > 0,
-            "image_path": image_path,
-        }
-        for report_id, uploaded_at, confidence, image_path, simplified_length in rows
-    ]
+    listed: list[dict[str, object]] = []
+    for (
+        report_id,
+        uploaded_at,
+        confidence,
+        image_path,
+        simplified_length,
+        title,
+        derived_title,
+        report_date,
+        attention_count,
+        values_read,
+        values_expected,
+        parse_note,
+        original_text,
+    ) in rows:
+        panel = derived_title or summarise_report(original_text or "")["title"]
+        day = report_date or (uploaded_at.date() if uploaded_at else None)
+        listed.append(
+            {
+                "id": report_id,
+                "title": title or panel,
+                "derived_title": panel,
+                "report_date": day.isoformat() if day else None,
+                "uploaded_at": uploaded_at.isoformat(),
+                "confidence": confidence,
+                "has_simplified": simplified_length > 0,
+                "image_path": image_path,
+                "attention_count": attention_count or 0,
+                "values_read": values_read,
+                "values_expected": values_expected,
+                "parse_note": parse_note,
+            }
+        )
+    return listed
+
+
+class ReportTitleUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+@app.patch("/reports/{report_id}")
+def rename_report(
+    report_id: int,
+    body: ReportTitleUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict[str, object]:
+    """Let the patient rename a report. The derived panel title is kept."""
+    report = (
+        db.query(Report)
+        .filter(Report.id == report_id, Report.user_id == user.id)
+        .one_or_none()
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="That report is no longer available.")
+    cleaned = body.title.strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="Give this report a name.")
+    report.title = cleaned
+    db.commit()
+    return {
+        "id": report.id,
+        "title": report.title,
+        "derived_title": report.derived_title,
+    }
+
+
+def _stamp_report(report: Report, user: User) -> None:
+    """Fill list-facing fields from the OCR text. Never uses the first line."""
+    summary = summarise_report(
+        report.original_text or "",
+        getattr(user, "sex_at_birth", None) or getattr(user, "sex", None),
+    )
+    report.derived_title = str(summary["title"])
+    report.report_date = (report.uploaded_at or utc_now()).date()
+    report.attention_count = int(summary["attention_count"])
+    report.values_read = int(summary["values_read"])
+    report.values_expected = int(summary["values_expected"])
+    report.parse_note = summary["parse_note"]  # type: ignore[assignment]
 
 
 @app.get("/profile")
@@ -326,7 +418,11 @@ def update_profile(
     db: DbSession,
     payload: dict[str, object],
 ) -> dict[str, object]:
-    """Create or replace the profile answers collected during onboarding."""
+    """Save the questionnaire answers that were sent; other fields are kept.
+
+    Every key is optional, so the three onboarding screens can each save as
+    the user finishes them. A failed validation stores nothing.
+    """
     try:
         update = ProfileUpdate.model_validate(payload)
     except ValidationError as exc:
@@ -336,30 +432,41 @@ def update_profile(
         ) from exc
 
     # ``user`` is attached to this request's session, so write to it directly.
-    user.name = update.name
-    user.age = update.age
-    user.weight = update.weight
-    user.height = update.height
-    user.sex = update.sex
-    user.conditions = update.conditions
-    user.medications = update.medications
-    user.allergies = update.allergies
+    apply_profile_update(user, update)
     db.commit()
     return profile_payload(user)
 
 
 @app.delete("/profile")
 def delete_profile(user: CurrentUser, db: DbSession) -> dict[str, bool]:
-    """Delete this patient's MedAIx profile and the reports stored for them.
+    """Delete this patient's health data: answers, consent and stored reports.
 
-    The Supabase sign-in remains. The next request creates a blank profile,
-    so onboarding runs again.
+    The account (sign-in id, name, email) stays, so the user is not locked
+    out; onboarding simply runs again because consent is gone.
     """
     db.query(Report).filter(Report.user_id == user.id).delete()
     db.query(Medicine).filter(Medicine.user_id == user.id).delete()
     db.query(WellnessLog).filter(WellnessLog.user_id == user.id).delete()
     db.query(QRSession).filter(QRSession.user_id == user.id).delete()
-    db.delete(user)
+    clear_health_data(user)
     db.commit()
     return {"deleted": True}
+
+
+@app.get("/risk-trends")
+def risk_trends(user: CurrentUser, db: DbSession) -> dict[str, object]:
+    """Rule-based trends and alerts across the signed-in user's reports.
+
+    Parses lab values out of each report's OCR text, groups them per marker
+    and applies the Sprint 3 rules (``trends.py``). ``needs_reports`` is true
+    until two reports exist; single-point markers are still listed so the app
+    can show "1 report so far", but never raise an alert.
+    """
+    rows = (
+        db.query(Report.id, Report.uploaded_at, Report.original_text)
+        .filter(Report.user_id == user.id)
+        .order_by(Report.uploaded_at, Report.id)
+        .all()
+    )
+    return build_risk_trends(user, rows)
 

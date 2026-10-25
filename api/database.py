@@ -101,6 +101,68 @@ def rename_legacy_user_uid() -> None:
             )
 
 
+def _portable_column_type(column_type: object) -> str:
+    """DDL type name that both SQLite and Postgres accept for a model column."""
+    from sqlalchemy import Boolean, Date, DateTime, Float, Integer, Text
+
+    if isinstance(column_type, Boolean):
+        return "BOOLEAN"
+    if isinstance(column_type, Date):
+        return "DATE"
+    if isinstance(column_type, DateTime):
+        return "TIMESTAMP"
+    if isinstance(column_type, Integer):
+        return "INTEGER"
+    if isinstance(column_type, Float):
+        return "FLOAT"
+    if isinstance(column_type, Text):
+        return "TEXT"
+    return "VARCHAR"
+
+
+def add_missing_user_columns(bind=None) -> list[str]:
+    """Add any ``users`` column the model declares but the table lacks.
+
+    ``create_all`` only creates missing *tables*, so a database created before
+    the Sprint 3 questionnaire would keep its old ``users`` shape and every
+    profile read would fail on the first new column. Each missing column is
+    added with ``ALTER TABLE ... ADD COLUMN`` using a type name SQLite and
+    Postgres both understand. Idempotent: a second call adds nothing.
+
+    ``bind`` defaults to the application engine; tests pass a throwaway one.
+    Returns the names of the columns that were added.
+    """
+    from models import Report, User
+
+    added = _add_missing_columns(User, bind)
+    added.extend(_add_missing_columns(Report, bind))
+    return added
+
+
+def _add_missing_columns(model: type, bind=None) -> list[str]:
+    from sqlalchemy import inspect, text
+
+    target = bind if bind is not None else engine
+    table = model.__tablename__
+    inspector = inspect(target)
+    if not inspector.has_table(table):
+        return []
+    existing = {column["name"] for column in inspector.get_columns(table)}
+    added: list[str] = []
+    with target.begin() as connection:
+        for column in model.__table__.columns:
+            if column.name in existing:
+                continue
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} ADD COLUMN {column.name} "
+                    f"{_portable_column_type(column.type)}"
+                )
+            )
+            added.append(column.name)
+    return added
+
+
 def warn_if_ephemeral() -> None:
     """Log loudly when running on a throwaway filesystem.
 

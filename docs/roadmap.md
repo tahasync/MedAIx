@@ -1,7 +1,9 @@
 > **Status: Sprint 2 — NLP simplification + profile storage. COMPLETE.** Sprint 1 (report upload + OCR) closed with **88.41%–91.53%** OCR accuracy across six samples, a **100% pass rate** against the ≥85% target (see `D:\Fyp\reports.zip`). Sprint 2 closed with `/simplify-report`, `/reports`, `/profile` CRUD, Supabase sign-in, the gated onboarding questionnaire, and the simplified-report screen; 22 term sets validated, profile CRUD verified, and 122/122 real lab-report photos processed end-to-end (see Sprint 2 below). Sprint 3 (risk/trend analysis) is next.
 # MedAIx — 32-Week Solo Execution Plan (Muhammad Taha Naeem)
 
-> **Status:** Sprints 1–2 complete (see detail above). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is [`color-system.md`](color-system.md); later sprint features remain on this plan.
+> **Status:** Sprints 1–2 complete (see detail above). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is the flat mockup [`design/medaix-mockup.html`](../design/medaix-mockup.html), with the rules in [`AGENTS.md`](../AGENTS.md) §3 and the implemented tokens in [`design-system.md`](design-system.md); later sprint features remain on this plan.
+
+> **UI foundation (2026-10-25).** The Flutter UI layer — design tokens, component kit, five-tab shell and every screen in the mockup — was built ahead of schedule against `design/medaix-mockup.html`, with medicines, wellness, sharing, doctor match and insights on in-memory fakes. To keep delivery sprint-by-sprint, screens are **gated by sprint**: `app/lib/core/features.dart` reads `MEDAIX_SPRINT` (default **3**) and hides every tab, tile, settings row and route that belongs to a later sprint. Each sprint from here stays backend-first as planned; its last step is bumping the build sprint so the already-reviewed screen appears, wired to the real endpoint (`--dart-define=MEDAIX_SPRINT=13` shows everything for a demo). `app/test/feature_gate_test.dart` pins the current sprint.
 
 Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod + Supabase, GitHub Actions CI/CD, spec-first + OpenCode CLI build pattern. No group dependency — every sprint is sequenced so one person can execute it. **Zero-cost stack:** Render's free web service for backend hosting + Neon's free Postgres tier for the database — no Railway, no paid infra anywhere.
 
@@ -48,7 +50,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 
 ### Week 0 — Setup
 - FastAPI skeleton (`/health` endpoint working), Postgres/SQLite schema (User, Report, Medicine, WellnessLog, QRSession).
-- Flutter skeleton: Riverpod providers structure, routing, theme — reuse Foam Shop's CI/CD setup *structure* (auth and storage are on Supabase), but the visual language is MedAIx's own: brand palette Ink `#0E0D15` / Navy `#182346` / Steel `#3D5387` / Slate `#7C83AD` / Mauve `#BFA9BA`, full light/dark `ColorScheme` + separate error/warning/success semantic colors, styled per the premium glass/atmospheric direction (selective glass + subtle elevation, not the old flat no-elevation look) — spec lives in [`color-system.md`](color-system.md). Nothing's built yet, so this is the starting theme, not a migration.
+- Flutter skeleton: Riverpod providers structure, routing, theme — reuse Foam Shop's CI/CD setup *structure* (auth and storage are on Supabase), but the visual language is MedAIx's own: brand palette Ink `#0E0D15` / Navy `#182346` / Steel `#3D5387` / Slate `#7C83AD` / Mauve `#BFA9BA`, full light/dark `ColorScheme` + separate error/warning/success semantic colors, styled flat and minimal: depth from surface tone only (`background` → `surface` → `surface2`), no gradients, blur or decorative shadows, the floating bottom nav the single shadowed surface — spec in [`design-system.md`](design-system.md) and [`AGENTS.md`](../AGENTS.md) §3 (this superseded an earlier glass/atmospheric direction described in `color-system.md`).
 - GitHub Actions: copy foam-shop-erp's APK build workflow, retarget to medaix-app repo.
 - Render web service created for `medaix-api` (free tier); Neon project created for the Postgres DB; confirm `api-deploy.yml` pushes a "hello world" `/health` endpoint live before building real features.
 - Set up `keep-alive.yml` (10-min cron pinging `/health`) and, as a backup since GitHub's scheduled crons can be delayed under load, a free UptimeRobot or cron-job.org monitor hitting the same URL every 5 minutes — verify in the Render dashboard that the service actually stays "Live" instead of cycling to "Suspended" over a few idle hours before you trust it. ✅ **Done** — `keep-alive.yml` on the 10-min cron plus a UptimeRobot HTTP(s) monitor on `https://medaix.onrender.com/health` at 5-minute intervals. Both report the service up; UptimeRobot shows 100% uptime and 0 incidents.
@@ -67,14 +69,16 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 - Optimisation pass (2026-10-25): every authenticated request opened two database sessions (one in the auth dependency, one in the route), each costing a pool checkout ping and a ROLLBACK, and committed objects were re-SELECTed by SQLAlchemy's expire-on-commit. Against Neon at ~100 ms per round trip that was most of the request. Now one request-scoped session is shared by auth and route (`get_db`), `expire_on_commit=False`, the redundant `refresh()` calls are gone, and `/reports` selects summary columns instead of every report's full text. Measured locally against Neon: `/profile` 390 → 290 ms, `/reports` 800 → 400 ms, `/simplify-report` 1.3 s → 0.6 s (first) and 830 → 400 ms (view); the 122-report batch now averages 1.1 s upload + 0.6 s simplify (was 2.3 s + 1.3 s). On Render, co-located with Neon, the absolute savings are smaller but the round-trip count is what the free tier pays for. Backend suite: 70 passed.
 
 ### Sprint 3 (Wk 5–6) — Risk/Trend Analysis (EP-02, PB-03, US-03)
-- Backend: rule-based trend detection first, `/risk-trends` endpoint.
-- Frontend: trend/alert UI on profile screen (empty state until 2+ reports exist to trend against).
-- Test: build abnormal-value test cases, verify alerts fire correctly.
+- ✅ Backend: rule-based trend detection first, `/risk-trends` endpoint implemented; 30+ test cases covering rising/falling streaks, crossed high/low alerts, out-of-range warnings, and insights.
+- ✅ Frontend: trend/alert UI on profile screen (`trends_screen.dart`) with state switching (loading → error → empty → data); trend chart with dashed warn threshold; per-marker detail view; "View trend over time" from ReportScreen.
+- ✅ Test: 30+ abnormal-value test cases built and verified in `api/tests/test_trends.py`; rising_streak, falling_streak, crossed_high, crossed_low, out_of_range, and insight alerts all verified.
 
 ### Sprint 4 (Wk 7–8) — Wellness Tracking UI (EP-06, PB-07/08/09)
-- Backend: wellness APIs (condition-based step goals, hydration calc by weight), RAG stub for tips.
-- Frontend: steps/water/exercise logging UI (empty state before first log, success feedback per entry), daily habit-score widget with skeleton loading.
-- Test: log flows end-to-end, draft the Sem-2 usability testing script now (write it while it's fresh, use it later).
+
+### Sprint 4 (Wk 7–8) — Wellness Tracking UI (EP-06, PB-07/08/09)
+- ✅ Backend: wellness APIs (condition-based step goals, hydration calc by weight), RAG stub for tips - to be implemented; WellnessLog model and `/wellness/log` endpoint following Sprint 1–3 pattern.
+- ⚪ Frontend: steps/water/exercise logging UI (empty state before first log, success feedback per entry), daily habit-score widget with skeleton loading - planned; Wellness screen per mockup: habit score ring, water intake progress, step goal progress conditioned on user's condition.
+- 🟡 Test: log flows end-to-end, draft the Sem-2 usability testing script now (write it while it's fresh, use it later) - to be started.
 
 ### Sprint 5 (Wk 9–10) — Integration Pass 1
 - Wire Upload → OCR → NLP → Profile → Risk → Wellness into one continuous flow.
@@ -85,7 +89,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 ### Sprint 6 (Wk 11–12) — Bug Fixing + Advisor Feedback Round
 - Address advisor feedback from Sem 1 review.
 - Backend: stability pass, OpenAPI/Swagger docs.
-- Frontend: UI consistency pass against the brand palette, styled per the premium glass/atmospheric direction (selective glass + subtle elevation, floating bottom nav, AI-insight card on Home) — full spec in [`color-system.md`](color-system.md).
+- Frontend: UI consistency pass against the flat design system (tokens, kit, floating bottom nav, AI-insight card on Home) — full spec in [`design-system.md`](design-system.md); `app/test/design_system_test.dart` is the guard.
 - Update SRS with actuals; refine Sem 2 backlog.
 
 ### Sprint 7 (Wk 13–14) — Buffer / Hardening

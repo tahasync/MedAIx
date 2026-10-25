@@ -1,0 +1,64 @@
+name: App Build Sprint 3
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - '.github/workflows/app-build-sprint.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/app-build-sprint.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: app-build-sprint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable Android SDK
+        run: |
+          chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "build-tools;34.0.0"
+
+      - name: Build debug APK with Sprint 3 flag
+        run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=3
+
+      - name: Verify APK exists
+        run: |
+          APK=build/app/outputs/flutter-apk/app-debug.apk
+          test -f "$APK" || { echo "::error::APK not found at $APK"; exit 1; }
+          echo "APK built successfully at $APK"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-sprint3.apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7

@@ -1,7 +1,48 @@
 # MedAIx API
 
 FastAPI backend for MedAIx. Sprint 1 includes `/health` and `/upload-report`
-with English, Urdu-script, and Roman Urdu OCR modes.
+with English, Urdu-script, and Roman Urdu OCR modes; Sprint 2 added
+simplification, report listing and the profile; Sprint 3 added the
+questionnaire profile and rule-based `/risk-trends`.
+
+## Endpoints
+
+All routes except `/health` need `Authorization: Bearer <Supabase access token>`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Liveness plus which database backend is configured |
+| POST | `/upload-report` | OCR a report image/PDF (`file`, optional `language`) and store the text |
+| POST | `/simplify-report` | `{"report_id": n}` → plain-language version of a stored report |
+| GET | `/reports` | The signed-in user's reports, newest first |
+| GET | `/profile` | Questionnaire answers + `onboarding_complete` |
+| PUT | `/profile` | Partial update: only the keys sent change (see below) |
+| DELETE | `/profile` | Clears every health answer, consent and stored reports; name/email stay |
+| GET | `/risk-trends` | Lab values parsed from every report, grouped per marker, with rule-based alerts |
+
+### `/profile` fields (Sprint 3 questionnaire)
+
+`name` (2–60), `date_of_birth` (ISO date, must be 18+), `sex_at_birth`
+(`female` / `male` / `prefer_not_to_say`), `consent` (`{"terms": true,
+"health_data": true}` — the server stamps `version` and `accepted_at`; it can
+only be withdrawn with `DELETE`), `conditions`, `allergies`, `takes_medicines`,
+`medications`, `pregnancy_status` (stored for female only),
+`prostate_urinary_issue` (stored for men 40+ only), `first_goal`
+(`reports` / `medicines` / `condition` / `habits`), `height_cm` (50–250),
+`weight_kg` (2–400). `age` is derived from `date_of_birth`. The legacy keys
+`age`, `weight`, `height`, `sex` are still accepted and echoed.
+`onboarding_complete` = name + date of birth + sex at birth + both consents.
+Validation errors are 422 with a plain-language `detail` the app shows as-is.
+
+### `/risk-trends`
+
+Returns `reports_count`, `needs_reports` (true until 2 reports exist),
+`focus_markers` (from the profile's conditions), one `insight` and a `trends`
+list: per marker the unit, the reference range (printed on the report, else a
+default by sex at birth), `direction`, dated `points` with `ok`/`warn`/`error`
+status and an optional `alert` (`rising_streak`, `falling_streak`,
+`crossed_high`, `crossed_low`, `out_of_range`). Pure rules in `trends.py`;
+values are echoed exactly as OCR printed them.
 
 ## Requirements
 

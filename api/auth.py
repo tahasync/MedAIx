@@ -98,16 +98,22 @@ def get_current_user(
             detail="Please sign in to continue.",
         )
 
-    subject = verify_access_token(credentials.credentials)["sub"]
+    claims = verify_access_token(credentials.credentials)
+    subject = claims["sub"]
     if not isinstance(subject, str):
         raise HTTPException(
             status_code=401,
             detail="Your session has expired. Please sign in again.",
         )
+    # Supabase puts the sign-in address in the token. It is account data,
+    # not a health answer, so it lives on the user row next to the name and
+    # is never editable through PUT /profile.
+    email = claims.get("email")
+    email = email.strip().lower() if isinstance(email, str) and email.strip() else None
 
     user = db.query(User).filter(User.supabase_uid == subject).one_or_none()
     if user is None:
-        user = User(supabase_uid=subject)
+        user = User(supabase_uid=subject, email=email)
         db.add(user)
         try:
             db.commit()
@@ -115,4 +121,7 @@ def get_current_user(
             # Two first requests raced; the other one won. Use its row.
             db.rollback()
             user = db.query(User).filter(User.supabase_uid == subject).one()
+    elif email is not None and user.email != email:
+        user.email = email
+        db.commit()
     return user
