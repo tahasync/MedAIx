@@ -9,6 +9,8 @@ sharing are not part of this release.
 
 > **Current milestone: Sprint 5 (Wk 9–10) — Integration Pass 1.** See
 > [`docs/roadmap.md`](docs/roadmap.md) for scope, checks, and limitations.
+>
+> **Android release:** `0.1.2+3` — GitHub release tag `v0.1.2`.
 
 ## Live
 
