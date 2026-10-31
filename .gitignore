@@ -13,6 +13,9 @@ venv/
 .mypy_cache/
 *.egg-info/
 api/.tessdata/
+api/local_models/
+reports_unzipped/
+_live.png
 
 # ---- Local DB ----
 *.db

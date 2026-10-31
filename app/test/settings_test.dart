@@ -4,7 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/features/auth/ui/sign_in_screen.dart';
+import 'package:tahasync_medaix/features/profile/providers/profile_providers.dart';
 import 'package:tahasync_medaix/features/profile/ui/profile_screen.dart';
+import 'package:tahasync_medaix/features/reports/data/reports_repository.dart';
+import 'package:tahasync_medaix/features/reports/providers/reports_providers.dart';
 import 'package:tahasync_medaix/features/settings/providers/settings_providers.dart';
 import 'package:tahasync_medaix/features/settings/ui/reminders_screen.dart';
 import 'package:tahasync_medaix/features/settings/ui/settings_screen.dart';
@@ -227,6 +230,46 @@ void main() {
       expect(find.text('Peanuts'), findsOneWidget);
       expect(find.textContaining('· 30'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Edit details'), findsOneWidget);
+    });
+
+    testWidgets('health-data deletion explains which records are removed', (
+      tester,
+    ) async {
+      await usePhone(tester);
+      await tester.pumpWidget(testAppAt('/settings/profile'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Delete my health data'));
+      await _tapButton(tester, 'Delete my health data');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete your health data?'), findsOneWidget);
+      expect(find.textContaining('reports, wellness logs'), findsOneWidget);
+      expect(find.textContaining('Your name and email stay.'), findsOneWidget);
+    });
+
+    test('deleting health data clears cached report history', () async {
+      final FakeReportsRepository reports = FakeReportsRepository(
+        latency: Duration.zero,
+        uploadDelay: Duration.zero,
+      );
+      final ProviderContainer container = ProviderContainer(
+        overrides: fakeOverrides(reports: reports),
+      );
+      addTearDown(container.dispose);
+      final int reportId = (await reports.listReports()).first.id;
+      await container.read(reportDetailProvider(reportId).future);
+
+      expect(
+        await container.read(profileEditorProvider.notifier).delete(),
+        isTrue,
+      );
+
+      expect(await reports.listReports(), isEmpty);
+      await expectLater(
+        container.read(reportDetailProvider(reportId).future),
+        throwsA(isA<RepositoryException>()),
+      );
     });
 
     testWidgets('validation blocks an empty name; saving shows a toast', (

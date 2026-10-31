@@ -23,6 +23,9 @@ class FakeReportsRepository implements ReportsRepository {
   int _nextId = 100;
 
   @override
+  Future<void> clearHealthData() async => _reports.clear();
+
+  @override
   Future<List<LabReport>> listReports() async {
     await Future<void>.delayed(latency);
     return List<LabReport>.unmodifiable(_reports);
@@ -44,6 +47,7 @@ class FakeReportsRepository implements ReportsRepository {
   Future<LabReport> uploadReport(
     String filePath, {
     ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
     void Function(UploadPhase phase)? onPhase,
   }) async {
     final Duration step = uploadDelay ~/ 3;
@@ -201,17 +205,33 @@ class FakeReportsRepository implements ReportsRepository {
     ),
   ];
 
-  static TrendSeries sampleTrend() => const TrendSeries(
+  static TrendSeries sampleTrend() => TrendSeries(
     marker: 'HbA1c',
     unit: '%',
     points: <TrendPoint>[
-      TrendPoint(label: 'Mar', value: 5.9),
-      TrendPoint(label: 'Jun', value: 6.1),
-      TrendPoint(label: 'Aug', value: 6.2),
-      TrendPoint(label: 'Oct', value: 6.4),
+      TrendPoint(
+        date: DateTime.utc(2026, 3, 1),
+        dateSource: 'sample',
+        value: 5.9,
+      ),
+      TrendPoint(
+        date: DateTime.utc(2026, 6, 1),
+        dateSource: 'sample',
+        value: 6.1,
+      ),
+      TrendPoint(
+        date: DateTime.utc(2026, 8, 1),
+        dateSource: 'sample',
+        value: 6.2,
+      ),
+      TrendPoint(
+        date: DateTime.utc(2026, 10, 1),
+        dateSource: 'sample',
+        value: 6.4,
+      ),
     ],
     threshold: 6.0,
-    rangeLabel: '4 reports · Mar to Oct',
+    rangeLabel: 'Sample data · 4 results',
     alertTitle: 'Rising 3 times in a row',
     alertBody: 'This isn’t a diagnosis. A doctor can confirm with more tests.',
   );

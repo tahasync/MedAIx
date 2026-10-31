@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tahasync_medaix/data/api/api_client.dart';
+import 'package:tahasync_medaix/data/api/api_repositories.dart';
 
 void main() {
   group('ApiClient.checkHealth', () {
@@ -236,8 +237,7 @@ void main() {
       expect(calls, 1);
     });
 
-    // Every attempt failing must still surface, not loop forever. A 503 with
-    // no body maps to the busy wording that prompted this fix.
+    // Every cold-start attempt failing must still surface, not loop forever.
     test('gives up after the configured number of attempts', () async {
       var calls = 0;
       final client = clientWith(
@@ -260,9 +260,10 @@ void main() {
       expect(calls, 3);
     });
 
-    // A transport error (no status code) is retryable and must rebuild the
-    // one-shot MultipartRequest body on each attempt.
-    test('retries a transport failure and gives up cleanly', () async {
+    // A transport failure can happen after the server stores the report. The
+    // UI retry reuses its stable upload id, but this request must not blindly
+    // issue extra POSTs itself.
+    test('does not retry an ambiguous transport failure', () async {
       var calls = 0;
       final client = clientWith(
         MockClient((_) async {
@@ -272,12 +273,62 @@ void main() {
       );
 
       await expectLater(
-        client.uploadReport(filePath),
+        client.uploadReport(filePath, uploadId: 'retry-safe-test'),
         throwsA(
           isA<ApiException>().having((e) => e.statusCode, 'statusCode', isNull),
         ),
       );
-      expect(calls, 3);
+      expect(calls, 1);
     });
+
+    test('sends the stable upload id as multipart form data', () async {
+      String? receivedBody;
+      final client = clientWith(
+        MockClient((request) async {
+          receivedBody = request.body;
+          return http.Response(
+            '{"id":7,"text":"Hemoglobin 13.2","confidence":91.5,'
+            '"skew_corrected_degrees":0.4,"language":"english"}',
+            200,
+          );
+        }),
+      );
+
+      await client.uploadReport(filePath, uploadId: 'upload-test-7');
+
+      expect(receivedBody, contains('name="upload_id"\r\n\r\nupload-test-7'));
+    });
+  });
+
+  test('keeps a successfully uploaded report when explaining fails', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'medaix_partial_upload_test',
+    );
+    final file = File('${tempDir.path}/report.pdf')
+      ..writeAsBytesSync(const <int>[0x25, 0x50, 0x44, 0x46, 0x0A]);
+    final api = ApiClient(
+      baseUrl: 'http://localhost:8000',
+      client: MockClient((request) async {
+        if (request.url.path == '/upload-report') {
+          return http.Response(
+            '{"id":12,"text":"Hemoglobin 10 g/dL","confidence":88,'
+            '"language":"english"}',
+            200,
+          );
+        }
+        return http.Response('{"detail":"Try again shortly."}', 503);
+      }),
+    );
+    final repository = ApiReportsRepository(api);
+
+    final report = await repository.uploadReport(
+      file.path,
+      uploadId: 'retry-safe-12',
+    );
+
+    expect(report.id, 12);
+    expect(report.originalText, 'Hemoglobin 10 g/dL');
+    expect(report.hasSimplified, isFalse);
+    await tempDir.delete(recursive: true);
   });
 }

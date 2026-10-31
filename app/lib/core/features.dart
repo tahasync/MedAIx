@@ -9,7 +9,7 @@
 /// Build the current sprint (the default), or everything for a demo:
 ///
 /// ```powershell
-/// flutter run                                   # kBuildSprint = 4
+/// flutter run                                   # kBuildSprint = 5
 /// flutter run --dart-define=MEDAIX_SPRINT=13    # every screen
 /// ```
 ///
@@ -19,7 +19,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// The sprint this build is for. Bump it when a sprint's backend lands.
-const int kBuildSprint = int.fromEnvironment('MEDAIX_SPRINT', defaultValue: 4);
+const int kBuildSprint = int.fromEnvironment('MEDAIX_SPRINT', defaultValue: 5);
 
 /// A sprint number past the last one in the roadmap: everything enabled.
 const int kAllSprints = 99;

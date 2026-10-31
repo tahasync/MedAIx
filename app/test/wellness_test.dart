@@ -23,23 +23,31 @@ void main() {
     expect(formatThousands(1234567), '1,234,567');
   });
 
-  testWidgets('renders the three habit cards and the score', (tester) async {
+  testWidgets('shows the daily log, progress and practical habit cards', (
+    tester,
+  ) async {
     await usePhone(tester);
     await tester.pumpWidget(wellnessScreen());
     await tester.pumpAndSettle();
 
-    expect(find.text('Today'), findsOneWidget);
-    expect(find.textContaining('Habit score'), findsOneWidget);
-    expect(find.text('Water'), findsOneWidget);
-    expect(find.textContaining('750 / 2400 ml'), findsOneWidget);
-    expect(find.text('Steps'), findsOneWidget);
+    expect(find.text('Wellness'), findsOneWidget);
+    expect(find.text('Your daily log'), findsOneWidget);
+    expect(find.text('Today’s progress'), findsOneWidget);
+    expect(find.text('Habit score 40%'), findsOneWidget);
     expect(
-      find.text('4,120 / 6,000 · goal set for your condition'),
+      find.text('Based on habits you log here; it is not a health assessment.'),
       findsOneWidget,
     );
-    expect(find.text('Exercise'), findsOneWidget);
-    expect(find.text('Not logged yet'), findsOneWidget);
-    expect(find.byType(ProgressBar), findsNWidgets(2));
+    expect(find.text('Water'), findsOneWidget);
+    expect(find.textContaining('750 / 2,400 ml'), findsOneWidget);
+    expect(find.text('Steps'), findsOneWidget);
+    expect(
+      find.text('4,120 / 6,000 steps · goal set for your condition'),
+      findsOneWidget,
+    );
+    expect(find.text('Movement'), findsNWidgets(2));
+    expect(find.text('No activity logged today'), findsOneWidget);
+    expect(find.byType(ProgressBar), findsNWidgets(3));
   });
 
   testWidgets('+250 ml updates the text and toasts', (tester) async {
@@ -50,22 +58,43 @@ void main() {
     await tester.tap(find.byTooltip('Add 250 ml'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('1000 / 2400 ml'), findsOneWidget);
+    expect(find.textContaining('1,000 / 2,400 ml'), findsOneWidget);
     expect(find.text('Added 250 ml of water'), findsOneWidget);
   });
 
-  testWidgets('Log walk shows Logged', (tester) async {
-    await usePhone(tester);
+  testWidgets('movement entries record the entered activity and minutes', (
+    tester,
+  ) async {
+    await usePhone(tester, size: const Size(390, 1200));
     await tester.pumpWidget(wellnessScreen());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Log walk'));
+    await tester.scrollUntilVisible(
+      find.text('Log activity'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Log activity'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Log walk'), findsNothing);
-    expect(find.text('Logged · 10 min'), findsOneWidget);
-    expect(find.text('Walk'), findsOneWidget);
-    expect(find.text('Walk logged'), findsOneWidget);
+    final List<TextField> fields = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .toList();
+    await tester.enterText(find.byWidget(fields[0]), 'Stretching');
+    await tester.enterText(find.byWidget(fields[1]), '20');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Save activity'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('20 min logged today'), findsOneWidget);
+    expect(find.text('Log activity'), findsOneWidget);
+    expect(find.text('Stretching logged'), findsOneWidget);
+
+    await tester.tap(find.text('Log activity'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '15');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Save activity'));
+    await tester.pumpAndSettle();
+    expect(find.text('35 min logged today'), findsOneWidget);
   });
 
   testWidgets('logs a validated step entry', (tester) async {
@@ -79,7 +108,7 @@ void main() {
     await tester.tap(find.widgetWithText(PrimaryButton, 'Log steps'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('5,320 / 6,000'), findsOneWidget);
+    expect(find.textContaining('5,320 / 6,000 steps'), findsOneWidget);
     expect(find.text('Added 1,200 steps'), findsOneWidget);
   });
 
@@ -105,7 +134,7 @@ void main() {
 
     expect(find.textContaining('500 ml logged'), findsOneWidget);
     expect(find.textContaining('no estimate is shown'), findsOneWidget);
-    expect(find.byType(ProgressBar), findsOneWidget);
+    expect(find.byType(ProgressBar), findsNWidgets(2));
   });
 
   testWidgets('survives 200 % text scale without overflow', (tester) async {
@@ -113,6 +142,11 @@ void main() {
     await tester.pumpWidget(wellnessScreen(textScale: 2));
     await tester.pumpAndSettle();
 
+    await tester.dragUntilVisible(
+      find.text('Water'),
+      find.byType(Scrollable).first,
+      const Offset(0, -300),
+    );
     expect(find.text('Water'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

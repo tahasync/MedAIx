@@ -122,6 +122,64 @@ class SplashScreen extends StatelessWidget {
   }
 }
 
+/// Shown while Supabase restores the saved account session on startup.
+class AccountLoadingScreen extends StatelessWidget {
+  const AccountLoadingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final TextTheme text = Theme.of(context).textTheme;
+    return Scaffold(
+      backgroundColor: c.background,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpace.screen),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 112,
+                    height: 112,
+                    decoration: BoxDecoration(
+                      color: c.surface2,
+                      borderRadius: AppRadius.cardAll,
+                    ),
+                    alignment: Alignment.center,
+                    child: const BrandMark(size: 68),
+                  ),
+                  const SizedBox(height: AppSpace.xl),
+                  const SizedBox(
+                    width: 54,
+                    height: 54,
+                    child: CircularProgressIndicator(strokeWidth: 4),
+                  ),
+                  const SizedBox(height: AppSpace.xl),
+                  Text(
+                    'Setting up your account',
+                    textAlign: TextAlign.center,
+                    style: text.titleLarge,
+                  ),
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    'Fetching your profile and reports. This can take a '
+                    'moment on a slow connection.',
+                    textAlign: TextAlign.center,
+                    style: text.bodyLarge?.copyWith(color: c.muted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Shows [SplashScreen] for at least [minimumDuration] on cold start, then
 /// cross-fades to [child].
 class BootSplash extends ConsumerStatefulWidget {

@@ -142,10 +142,16 @@ class LabReport {
 
 /// A point on a trend chart.
 class TrendPoint {
-  const TrendPoint({required this.label, required this.value});
+  const TrendPoint({
+    required this.date,
+    required this.dateSource,
+    required this.value,
+  });
 
-  /// Short x label, e.g. "Mar".
-  final String label;
+  final DateTime date;
+
+  /// `report`, `upload`, or `sample` for obviously synthetic fixtures.
+  final String dateSource;
   final double value;
 }
 
@@ -156,7 +162,7 @@ class TrendSeries {
     required this.marker,
     required this.unit,
     required this.points,
-    required this.threshold,
+    this.threshold,
     required this.rangeLabel,
     this.alertTitle,
     this.alertBody,
@@ -166,10 +172,10 @@ class TrendSeries {
   final String unit;
   final List<TrendPoint> points;
 
-  /// Dashed line value.
-  final double threshold;
+  /// A real reference boundary, when one exists.
+  final double? threshold;
 
-  /// e.g. "4 reports · Mar to Oct".
+  /// Count and actual date span.
   final String rangeLabel;
   final String? alertTitle;
   final String? alertBody;
@@ -184,24 +190,40 @@ class TrendSeries {
         : last.value < first.value
         ? 'fell'
         : 'stayed';
-    return '$marker $verb from ${first.value} to ${last.value} '
-        'over ${points.length} reports.';
+    final String firstSource = first.dateSource == 'report'
+        ? 'report date'
+        : first.dateSource == 'sample'
+        ? 'sample date'
+        : 'upload date';
+    final String lastSource = last.dateSource == 'report'
+        ? 'report date'
+        : last.dateSource == 'sample'
+        ? 'sample date'
+        : 'upload date';
+    return '$marker $verb from ${first.value} on ${_trendDate(first.date)} '
+        '($firstSource) to ${last.value} on ${_trendDate(last.date)} '
+        '($lastSource), across ${points.length} reports.';
   }
 }
+
+String _trendDate(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
 
 /// Progress of an upload, for the reading screen's bar.
 enum UploadPhase { uploading, reading, explaining }
 
 extension UploadPhaseX on UploadPhase {
-  double get progress => switch (this) {
-    UploadPhase.uploading => 0.25,
-    UploadPhase.reading => 0.62,
-    UploadPhase.explaining => 0.9,
+  String get label => switch (this) {
+    UploadPhase.uploading => 'Sending the report and reading its text',
+    UploadPhase.reading => 'Checking the values we could read',
+    UploadPhase.explaining => 'Preparing a plain language explanation',
   };
 
-  String get label => switch (this) {
-    UploadPhase.uploading => 'Step 1 of 3 · uploading',
-    UploadPhase.reading => 'Step 2 of 3 · extracting values',
-    UploadPhase.explaining => 'Step 3 of 3 · explaining',
+  String get title => switch (this) {
+    UploadPhase.uploading => 'Reading your report',
+    UploadPhase.reading => 'Checking report values',
+    UploadPhase.explaining => 'Preparing your explanation',
   };
 }

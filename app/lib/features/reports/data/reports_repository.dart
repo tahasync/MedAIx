@@ -26,11 +26,16 @@ abstract class ReportsRepository {
   /// Newest first. Summary fields only.
   Future<List<LabReport>> listReports();
 
+  /// Clear report data kept in this repository after profile health-data
+  /// deletion. The API already deletes its rows in that request.
+  Future<void> clearHealthData();
+
   /// Uploads a photo/PDF, reads it, and explains it. [onPhase] is called as
   /// the work progresses so the reading screen can move its bar.
   Future<LabReport> uploadReport(
     String filePath, {
     ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
     void Function(UploadPhase phase)? onPhase,
   });
 

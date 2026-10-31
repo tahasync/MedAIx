@@ -33,8 +33,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       context,
       title: 'Delete your health data?',
       body:
-          'This clears your health answers and withdraws your consent. Your '
-          'name, email and reports are kept. This can’t be undone.',
+          'This permanently deletes your health answers, consent, reports, '
+          'wellness logs and other health records. Your name and email stay. '
+          'This can’t be undone.',
       confirmLabel: 'Delete my health data',
       cancelLabel: 'Keep my data',
       destructive: true,

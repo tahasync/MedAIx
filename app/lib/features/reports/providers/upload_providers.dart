@@ -6,6 +6,8 @@
 /// never touch a platform channel.
 library;
 
+import 'dart:math';
+
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -143,6 +145,9 @@ class UploadSuccess extends UploadState {
 
   /// The toast line: "Report ready. 2 values need attention".
   String get toastMessage {
+    if (!report.hasSimplified) {
+      return 'Report saved. Its explanation is still available to retry.';
+    }
     final int n = report.attentionCount;
     if (n == 0) return 'Report ready. All values look normal';
     return n == 1
@@ -157,6 +162,7 @@ class UploadFailure extends UploadState {
     required this.canRetry,
     required this.filePath,
     required this.language,
+    required this.uploadId,
   });
 
   /// User-safe, from [RepositoryException.message].
@@ -164,6 +170,7 @@ class UploadFailure extends UploadState {
   final bool canRetry;
   final String filePath;
   final ReportLanguage language;
+  final String uploadId;
 }
 
 class UploadController extends Notifier<UploadState> {
@@ -174,8 +181,10 @@ class UploadController extends Notifier<UploadState> {
   Future<void> submit(
     String filePath, {
     ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
   }) async {
     if (state is UploadInProgress) return;
+    final String stableUploadId = uploadId ?? _newUploadId();
     final String fileName = _fileName(filePath);
     state = UploadInProgress(phase: UploadPhase.uploading, fileName: fileName);
     try {
@@ -184,6 +193,7 @@ class UploadController extends Notifier<UploadState> {
           .uploadReport(
             filePath,
             language: language,
+            uploadId: stableUploadId,
             onPhase: (phase) {
               if (state is UploadInProgress) {
                 state = UploadInProgress(phase: phase, fileName: fileName);
@@ -202,6 +212,7 @@ class UploadController extends Notifier<UploadState> {
         canRetry: error.canRetry,
         filePath: filePath,
         language: language,
+        uploadId: stableUploadId,
       );
     } catch (_) {
       state = UploadFailure(
@@ -209,6 +220,7 @@ class UploadController extends Notifier<UploadState> {
         canRetry: true,
         filePath: filePath,
         language: language,
+        uploadId: stableUploadId,
       );
     }
   }
@@ -217,7 +229,7 @@ class UploadController extends Notifier<UploadState> {
   Future<void> retry() async {
     final UploadState s = state;
     if (s is! UploadFailure) return;
-    await submit(s.filePath, language: s.language);
+    await submit(s.filePath, language: s.language, uploadId: s.uploadId);
   }
 
   /// Back to the empty state ("Choose another file", after success).
@@ -235,6 +247,10 @@ class UploadController extends Notifier<UploadState> {
     final int cut = path.lastIndexOf(RegExp(r'[\\/]'));
     return cut < 0 ? path : path.substring(cut + 1);
   }
+
+  static String _newUploadId() =>
+      'upload_${DateTime.now().microsecondsSinceEpoch}_'
+      '${Random.secure().nextInt(1 << 32)}';
 }
 
 final uploadControllerProvider =

@@ -1,9 +1,9 @@
-> **Status: Sprints 1–4 complete.** Sprint 1 delivered report upload and OCR; Sprint 2 delivered simplification, profile storage, and authentication; Sprint 3 delivered risk/trend analysis; Sprint 4 delivers condition-aware wellness tracking with offline-safe logging. See the sprint sections below for recorded checks and limits.
+> **Status: Sprints 1–5 complete.** Sprint 1 delivered report upload and OCR; Sprint 2 delivered simplification, profile storage, and authentication; Sprint 3 delivered risk/trend analysis; Sprint 4 delivers condition-aware wellness tracking with offline-safe logging; Sprint 5 closes the first cross-feature integration pass. See the sprint sections below for recorded checks and limits.
 # MedAIx — 32-Week Solo Execution Plan (Muhammad Taha Naeem)
 
-> **Status:** Sprints 1–4 complete (see detail below). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is the flat mockup [`design/medaix-mockup.html`](../design/medaix-mockup.html), with the rules in [`AGENTS.md`](../AGENTS.md) §3 and the implemented tokens in [`design-system.md`](design-system.md); later sprint features remain on this plan.
+> **Status:** Sprints 1–5 complete (see detail below). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is the flat mockup [`design/medaix-mockup.html`](../design/medaix-mockup.html), with the rules in [`AGENTS.md`](../AGENTS.md) §3 and the implemented tokens in [`design-system.md`](design-system.md); later sprint features remain on this plan.
 
-> **UI foundation (2026-10-25).** The Flutter UI layer — design tokens, component kit, five-tab shell and every screen in the mockup — was built ahead of schedule against `design/medaix-mockup.html`. Medicines, sharing and doctor match remain on in-memory fakes; risk trends became API-backed in Sprint 3 and wellness in Sprint 4. Screens are **gated by sprint**: `app/lib/core/features.dart` reads `MEDAIX_SPRINT` (default **4**) and hides every tab, tile, settings row and route that belongs to a later sprint. `--dart-define=MEDAIX_SPRINT=13` shows everything for a demo. `app/test/feature_gate_test.dart` pins the current sprint.
+> **UI foundation (2026-10-25).** The Flutter UI layer — design tokens, component kit, five-tab shell and every screen in the mockup — was built ahead of schedule against `design/medaix-mockup.html`. Medicines, sharing and doctor match remain on in-memory fakes; risk trends became API-backed in Sprint 3 and wellness in Sprint 4. Screens are **gated by sprint**: `app/lib/core/features.dart` reads `MEDAIX_SPRINT` (default **5**) and hides every tab, tile, settings row and route that belongs to a later sprint. `--dart-define=MEDAIX_SPRINT=13` shows everything for a demo. `app/test/feature_gate_test.dart` pins the current sprint.
 
 Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod + Supabase, GitHub Actions CI/CD, spec-first + OpenCode CLI build pattern. No group dependency — every sprint is sequenced so one person can execute it. **Zero-cost stack:** Render's free web service for backend hosting + Neon's free Postgres tier for the database — no Railway, no paid infra anywhere.
 
@@ -11,7 +11,7 @@ Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod +
 - **Single monorepo:** `tahasync/medaix/` with `/app` (Flutter) and `/api` (FastAPI) as top-level folders. One repo, one Trello board, one commit history.
 - **CI/CD — four GitHub Actions workflows in the same repo:**
   - `.github/workflows/app-build.yml` — signs the production APK on `main` and `v*` tags; tagged builds publish the APK as a GitHub Release asset.
-  - `.github/workflows/app-build-sprint.yml` — analyzes and tests app changes, builds the Sprint 4 debug APK, and uploads it as a short-lived Actions artifact.
+  - `.github/workflows/app-build-sprint.yml` — analyzes and tests app changes, builds the Sprint 5 debug APK, and uploads it as a short-lived Actions artifact.
   - `.github/workflows/api-deploy.yml` — triggers on changes under `/api/**`, runs tests, then `curl`s Render's deploy hook URL to trigger a deploy.
   - `.github/workflows/keep-alive.yml` — **scheduled cron, no path filter**, `schedule: - cron: '*/10 * * * *'`, curls the API's own `/health` route every 10 minutes so Render's free instance never crosses the 15-minute idle threshold that puts it to sleep. Must hit a real app route, not `/robots.txt` — Render answers that path itself even while the service is spun down, so it never reaches your app and never resets the idle timer.
 - Add repo secrets: `RENDER_DEPLOY_HOOK_URL` (Render dashboard → service → Settings → Deploy Hook), `NEON_DATABASE_URL` (use Neon's pooled connection string — the one with `-pooler` in the hostname), `ANDROID_SIGNING_KEY` (reuse Foam Shop's if same keystore, else generate new).
@@ -76,14 +76,14 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 
 ### Sprint 4 (Wk 7–8) — Wellness Tracking UI (EP-06, PB-07/08/09)
 - ✅ Backend: owner-scoped `GET`/`POST /wellness/log`, day totals, client-id idempotency for safe replay, condition-aware step goals, cautious weight-based water estimate (suppressed for fluid-risk conditions), and deterministic local tip retrieval. Existing databases gain the new nullable columns and indexes at startup.
-- ✅ Frontend: real API repository with account-scoped cached days and a persisted offline outbox; water, step and exercise entry flows; offline/sync status; profile-deletion cleanup; and Sprint 4 gate enabled by default. Home shows the habit score with a loading skeleton.
+- ✅ Frontend: real API repository with account-scoped cached days and a persisted offline outbox; water, step and exercise entry flows; offline/sync status; profile-deletion cleanup; and Sprint 4 feature gate. Home shows the habit score with a loading skeleton.
 - ✅ Test: endpoint tests cover totals, idempotency, local timezone boundaries, limits and profile conditions; Flutter tests cover API mapping, offline replay, step logging, fluid-limit copy, feature gate and responsive layout. Full app/API suite results are recorded with the local completion change. Draft participant tasks are in [`sprint-4-usability-test.md`](sprint-4-usability-test.md).
 
 ### Sprint 5 (Wk 9–10) — Integration Pass 1
-- Wire Upload → OCR → NLP → Profile → Risk → Wellness into one continuous flow.
-- Fix API contract mismatches, add error handling across the chain.
-- Audit every screen built so far against the Global UX State System (empty/loading/error/success) and close gaps.
-- Full regression pass, log bugs to Trello.
+- ✅ Wire Upload → OCR → NLP → Profile → Risk → Wellness into one continuous flow. Upload retries carry a stable client id; the API returns the already-saved report on replay. If OCR succeeds but explanation is unavailable, the app preserves the report and opens its detail so explanation can be retried without another upload.
+- ✅ Close API contract and cache gaps. Existing report databases gain the nullable upload id and unique per-user index at startup. Profile edits refresh condition-aware trends and wellness goals; health-data deletion clears server and local report, trend, and wellness state. The confirmation now describes the records the API deletes.
+- ✅ Audit the integrated report/profile/trend/wellness screens for their normal, empty, loading, error, success, offline, and applicable permission states. Added regression coverage for retry safety, partial upload success, deletion disclosure, and clearing report history.
+- ✅ Full local regression: `flutter analyze` clean, **235 Flutter tests passed**, **251 API tests passed** (2026-10-31). OCR evaluation also covered 138 Train and 122 Test report images; a 12-image manually transcribed Test sample scored 92.9% row-level precision, recall, and F1. These sample metrics are not full-dataset OCR accuracy.
 
 ### Sprint 6 (Wk 11–12) — Bug Fixing + Advisor Feedback Round
 - Address advisor feedback from Sem 1 review.

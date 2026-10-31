@@ -27,6 +27,7 @@ permissions:
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: ./api
@@ -48,7 +49,7 @@ jobs:
         run: uv sync --frozen --dev
 
       - name: Run tests
-        run: uv run pytest -v
+        run: uv run pytest -q
 
       - name: Deploy to Render (free tier)
         if: >-

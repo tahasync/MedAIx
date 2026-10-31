@@ -84,15 +84,28 @@ class Report(Base):
     ocr_confidence = Column(Float, nullable=True)
     # List title: user override, else derived from the detected panel (never
     # the first OCR line — that is usually a letterhead or a patient name).
+    client_upload_id = Column(String, nullable=True)
     title = Column(String, nullable=True)
     derived_title = Column(String, nullable=True)
     report_date = Column(Date, nullable=True)
+    # ``report_date`` is trusted only when OCR found a clearly labelled date.
+    # Older rows have no source and must use ``uploaded_at`` instead.
+    report_date_source = Column(String, nullable=True)
     attention_count = Column(Integer, nullable=True)
     values_read = Column(Integer, nullable=True)
     values_expected = Column(Integer, nullable=True)
     parse_note = Column(String, nullable=True)
     uploaded_at = Column(DateTime, default=utc_now)
     processed_at = Column(DateTime, default=utc_now)
+
+    __table_args__ = (
+        Index(
+            "uq_reports_user_client_upload_id",
+            "user_id",
+            "client_upload_id",
+            unique=True,
+        ),
+    )
 
     user = relationship("User", back_populates="reports")
 

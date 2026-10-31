@@ -151,16 +151,21 @@ jobs:
         # comes from the SUPABASE_ANON_KEY secret.
         env:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "::error::SUPABASE_URL repository variable is not set."
+            exit 1
+          fi
           if [ -z "$SUPABASE_ANON_KEY" ]; then
             echo "::error::SUPABASE_ANON_KEY secret is not set."
             exit 1
           fi
           flutter build apk --release \
-            --dart-define=MEDAIX_SPRINT=4 \
+            --dart-define=MEDAIX_SPRINT=5 \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=SUPABASE_URL=https://fmjcifnrwbazdlrhklta.supabase.co \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 
       - name: Verify APK identity and signing state

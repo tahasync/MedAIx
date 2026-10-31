@@ -132,7 +132,10 @@ TrendOverview trendOverviewFromJson(Map<String, dynamic> json) {
 }
 
 MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
-  final String marker = json['marker'] as String? ?? 'Value';
+  final String rawMarker = json['marker'] as String? ?? '';
+  final String marker = _validMarker(rawMarker)
+      ? rawMarker.trim()
+      : 'Lab value';
   final String unit = json['unit'] as String? ?? '';
   final Map<String, dynamic> range =
       json['range'] as Map<String, dynamic>? ?? const <String, dynamic>{};
@@ -143,9 +146,13 @@ MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
           .toList();
   final List<TrendPoint> points = <TrendPoint>[
     for (final Map<String, dynamic> p in rawPoints)
-      if (p['value'] is num)
+      if (p['value'] is num &&
+          p['date'] is String &&
+          _isIsoDate(p['date'] as String) &&
+          (p['date_source'] == 'report' || p['date_source'] == 'upload'))
         TrendPoint(
-          label: p['label'] as String? ?? '',
+          date: DateTime.parse('${p['date']}T00:00:00Z'),
+          dateSource: p['date_source'] as String,
           value: (p['value'] as num).toDouble(),
         ),
   ];
@@ -168,7 +175,7 @@ MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
       points: points,
       // The dashed line is the upper limit; markers with only a lower limit
       // (HDL) draw that instead.
-      threshold: high ?? low ?? (points.isEmpty ? 0 : points.last.value),
+      threshold: high ?? low,
       rangeLabel: _rangeLabel(points.length, points, range['label'] as String?),
       alertTitle: alert?['title'] as String?,
       alertBody: alert?['body'] as String?,
@@ -187,8 +194,41 @@ ValueStatus _statusFrom(String? raw) => switch (raw) {
 /// back to the server's range label when there is a single point.
 String _rangeLabel(int count, List<TrendPoint> points, String? range) {
   if (count >= 2) {
-    return '$count reports · ${points.first.label} to ${points.last.label}';
+    return '$count results · ${_dateLabel(points.first)} to '
+        '${_dateLabel(points.last)}';
   }
-  if (count == 1) return '1 report so far';
+  if (count == 1) return '1 result · ${_dateLabel(points.first)}';
   return range ?? '';
+}
+
+String _dateLabel(TrendPoint point) =>
+    '${_dateSourceLabel(point.dateSource)} '
+    '${point.date.year.toString().padLeft(4, '0')}-'
+    '${point.date.month.toString().padLeft(2, '0')}-'
+    '${point.date.day.toString().padLeft(2, '0')}';
+
+bool _isIsoDate(String value) =>
+    RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) &&
+    DateTime.tryParse(value)?.toIso8601String().substring(0, 10) == value;
+
+String _dateSourceLabel(String source) => switch (source) {
+  'report' => 'Report',
+  'sample' => 'Sample',
+  _ => 'Uploaded',
+};
+
+bool _validMarker(String value) {
+  final String name = value.trim();
+  if (name.isEmpty ||
+      name.length > 36 ||
+      name.split(RegExp(r'\s+')).length > 5) {
+    return false;
+  }
+  if (RegExp(
+    r'\b(patient|registered|visit|number|collected|age|sex|name|date|report)\b',
+    caseSensitive: false,
+  ).hasMatch(name)) {
+    return false;
+  }
+  return RegExp(r"^[A-Za-z][A-Za-z0-9 ()+./-]*$").hasMatch(name);
 }

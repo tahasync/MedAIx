@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 
 from models import utc_now
@@ -63,9 +63,24 @@ _SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
             r"|\bfbs\b|\bfpg\b|\bfbg\b",
             "Fasting glucose",
         ),
+        (r"\bt(?:otal)?\.?\s*cholesterol\s*/\s*hdl(?:\s+cholesterol)?", "Total cholesterol/HDL ratio"),
+        (r"\bldl\s*/\s*hdl(?:\s+cholesterol)?", "LDL/HDL ratio"),
+        (r"\bvldl(?:\s*-?\s*cholesterol)?\b", "VLDL"),
+        (r"\balbumin\s*/\s*creatinine\s+ratio\b", "Albumin/creatinine ratio"),
+        (r"\brisk\s*ii\b", "Risk II"),
+        (r"\brisk\s*i\b", "Risk I"),
         (r"\bldl", "LDL"),
         (r"\bhdl", "HDL"),
+        (r"\b(?:c-?reactive\s+protein|crp)(?:\s+.*)?", "CRP"),
+        (r"\balpha\s+feto(?:protein)?|\bafp\b", "Alpha Feto Protein"),
+        (r"\bck\s*(?:\(\s*total\s*\)|total)|\bcpk\b", "CK Total"),
+        (r"\bcalprotectin\b", "Calprotectin"),
+        (r"\bferritin\s+in\s+serum\b", "Ferritin"),
+        (r"\bantistreptolysin\s*[- ]?o|\basot\b", "ASOT"),
+        (r"\buric\s+acid|\burate\b", "Uric Acid"),
         (r"triglycerides?|\btg\b", "Triglycerides"),
+        (r"prostatic\s+specific\s+antigen|prostate[- ]specific\s+antigen|\btotal\s+psa\b|\bpsa\b", "PSA"),
+        (r"25[- ]?hydroxyvitamin\s*d3?\b|25[- ]?oh\s*vitamin\s*d3?\b|\bvitamin\s*d3?\b", "Vitamin D"),
         (r"cholesterol", "Total cholesterol"),
         (r"creatinine", "Creatinine"),
         (r"\btsh\b|thyroid[\s-]*stimulating[\s-]*hormone", "TSH"),
@@ -75,7 +90,16 @@ _SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 
 # A number that is not glued to letters, so the "1" in "HbA1c" or "B12" is
 # skipped. An optional "<"/">" prefix is kept as part of the printed value.
-_NUMBER = re.compile(r"(?<![A-Za-z0-9.])(?:[<>]\s*)?(\d+(?:\.\d+)?)(?![A-Za-z0-9])")
+_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9.])(?:[<>]\s*)?(\d+(?:\.\d+)?)(?![A-Za-z0-9]|\s*[-–]\s*[A-Za-z]|\s*\(\s*(?:oh|hydroxy)\b|\s+hydroxyvitamin\b|\s+oh\b)",
+    re.IGNORECASE,
+)
+_VALUE_AT_LINE_START = re.compile(r"^\s*(?:[<>]\s*)?\d+(?:\.\d+)?\b")
+_VALUE_NEAR_LINE_START = re.compile(r"^\s*(?:[A-Za-z]{1,3}[\s:|]*){0,4}(?:[<>]\s*)?\d+(?:\.\d+)?\b")
+_RESULT_UNIT_TOKEN = re.compile(
+    r"%|(?<![A-Za-z0-9])(?:[A-Za-zµμ]+|x?10(?:[*^]\d+)?)/[A-Za-zµμ0-9.*^]+",
+    re.IGNORECASE,
+)
 # Dates and clock times are OCR noise for our purposes; strip them first so
 # "02/03/2026" never becomes a value of 2. The three-part date needs the same
 # separator twice, so a range such as "4.0-6.0" is left alone.
@@ -96,8 +120,10 @@ _BARE_UNITS = {"fl", "pg", "mmhg", "sec", "min", "mm", "ratio", "index", "iu", "
 _NOISE_FIRST_WORDS = {
     "accession", "age", "bill", "collected", "contact", "date", "dob", "fax",
     "gender", "id", "invoice", "lab", "mobile", "mrn", "no", "page", "patient",
-    "phone", "printed", "received", "ref", "reg", "report", "reported",
-    "sample", "sex", "sno", "specimen", "sr", "tel", "time",
+    "phone", "printed", "received", "ref", "reg", "report", "reported", "result",
+    "sample", "sex", "sno", "specimen", "sr", "tel", "time", "visit",
+    "registered", "name", "age/sex", "collected", "call", "comments",
+    "comment", "quantitative", "increased", "moderately", "severely",
 }  # fmt: skip
 
 
@@ -107,6 +133,94 @@ def canonical_marker(name: str) -> str:
         if pattern.search(name):
             return canonical
     return _title_case(name)
+
+
+_REPORT_DATE_LABELS = (
+    re.compile(
+        r"\b(?:collection|collected|sampling|sampled|specimen|sample|test|exam(?:ination)?)\s*date\b|"
+        r"\bdate\s+of\s+(?:collection|sampling|sample|specimen|test|exam(?:ination)?)\b|"
+        r"\b(?:collected|sampled)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:report|result|issued|printed)\s*date\b|"
+        r"\bdate\s+of\s+(?:report|result|issue)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*date\s*[:=#-]", re.IGNORECASE),
+)
+_MONTH_DATE = re.compile(
+    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,)?\s+(?:19|20)\d{2}\b|"
+    r"\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)\s+(?:19|20)\d{2}\b",
+    re.IGNORECASE,
+)
+_NUMERIC_DATE = re.compile(
+    r"(?<!\d)(?:(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|"
+    r"\d{1,2}[-/]\d{1,2}[-/](?:19|20)\d{2})(?!\d)"
+)
+
+
+def _parse_report_date_token(token: str) -> date | None:
+    """Parse only unambiguous, four-digit-year dates from a labelled field."""
+    token = " ".join(token.strip().replace(",", " ").split())
+    if re.fullmatch(r"(?:19|20)\d{2}-\d{1,2}-\d{1,2}", token):
+        try:
+            return date.fromisoformat(token)
+        except ValueError:
+            return None
+
+    numeric = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})[-/]((?:19|20)\d{2})", token)
+    if numeric:
+        first, second, year = (int(value) for value in numeric.groups())
+        if first > 12 and second <= 12:
+            day, month = first, second
+        elif second > 12 and first <= 12:
+            month, day = first, second
+        else:
+            # 03/04/2026 could mean either 3 April or March 4. Do not guess.
+            return None
+        try:
+            return date(int(year), month, day)
+        except ValueError:
+            return None
+
+    for pattern in ("%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(token, pattern).date()
+        except ValueError:
+            continue
+    return None
+
+
+def extract_report_date(text: str | None) -> date | None:
+    """Return a report date only when OCR places it beside a date label.
+
+    Unlabelled dates, dates of birth, and ambiguous numeric dates are ignored;
+    a bad date is worse than showing the upload date with its source disclosed.
+    """
+    if not text:
+        return None
+    candidates: list[tuple[int, date]] = []
+    for line in text.splitlines():
+        if re.search(r"\b(?:dob|date\s+of\s+birth|birth\s+date)\b", line, re.I):
+            continue
+        for priority, label_pattern in enumerate(_REPORT_DATE_LABELS):
+            label = label_pattern.search(line)
+            if label is None:
+                continue
+            remainder = line[label.end():]
+            token_match = _NUMERIC_DATE.search(remainder) or _MONTH_DATE.search(remainder)
+            if token_match is None:
+                break
+            parsed = _parse_report_date_token(token_match.group(0))
+            if parsed is not None:
+                candidates.append((priority, parsed))
+            break
+    return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def _title_case(name: str) -> str:
@@ -146,14 +260,33 @@ def _reference_range(
 
 
 def _parse_line(line: str) -> ParsedValue | None:
+    if _SKIP_CANDIDATE.search(line):
+        return None
     cleaned = _TIME.sub(" ", _DATE.sub(" ", line.replace("|", " ").replace("\t", " ")))
     cleaned = " ".join(cleaned.split())
-    match = _NUMBER.search(cleaned)
+    matches = list(_NUMBER.finditer(cleaned))
+    match = matches[0] if matches else None
     if not match:
         return None
 
+    # If OCR inserts a stray digit/flag before a result, prefer the last
+    # number before the first result unit (e.g. ``LDL 5 151 H mg/dL``).
+    first_unit = _RESULT_UNIT_TOKEN.search(cleaned, match.end())
+    if first_unit is not None:
+        before_unit = [candidate for candidate in matches if candidate.end() <= first_unit.start()]
+        if before_unit:
+            match = before_unit[-1]
+
     name = _EDGE_PUNCT.sub("", cleaned[: match.start()])
-    if len(re.sub(r"[^A-Za-z]", "", name)) < 2:
+    letters = re.sub(r"[^A-Za-z]", "", name)
+    words = re.findall(r"[A-Za-z]+", name)
+    if len(letters) < 2:
+        return None
+    # Unknown analytes are allowed, but OCR headers and whole report titles
+    # must not become chart markers. Known canonical markers bypass this cap.
+    if not any(pattern.search(name) for pattern, _ in _SYNONYMS) and (
+        len(name) > 36 or len(words) > 5 or any(len(word) > 16 for word in words)
+    ):
         return None
     first_word = re.sub(r"[^a-z]", "", name.split()[0].lower())
     if first_word in _NOISE_FIRST_WORDS:
@@ -163,6 +296,20 @@ def _parse_line(line: str) -> ParsedValue | None:
     value = float(match.group(1))
     unit, rest = _unit_and_rest(cleaned[match.end() :])
     low, high, raw_low, raw_high = _reference_range(rest)
+    known_marker = any(pattern.search(name) for pattern, _ in _SYNONYMS) or bool(
+        re.search(
+            r"\b(?:wbc|rbc|mcv|mch|mchc|rdw|sodium|potassium|calcium|"
+            r"urea|albumin|protein|crp|ferritin|vitamin\s*d|vitamin\s*b12|"
+            r"alt|ast|sgpt|sgot|bilirubin|alp|ggt)\b",
+            name,
+            re.IGNORECASE,
+        )
+    )
+    # OCR often places phone fragments, ages, or page numbers on otherwise
+    # unreadable lines. Unknown markers are useful only when the row has a
+    # unit or a printed reference range to support that it is a lab result.
+    if not known_marker and unit is None and low is None and high is None:
+        return None
     return ParsedValue(
         marker=canonical_marker(name),
         value=value,
@@ -184,11 +331,109 @@ def parse_lab_values(text: str | None) -> list[ParsedValue]:
     """
     if not text:
         return []
+    lines = text.splitlines()
     values: list[ParsedValue] = []
-    for line in text.splitlines():
+    for index, line in enumerate(lines):
         parsed = _parse_line(line)
+        if (
+            parsed is None
+            and index + 1 < len(lines)
+            and not _MISSING_VALUE.search(line)
+            and _looks_like_analyte_name(line)
+            and _VALUE_NEAR_LINE_START.search(lines[index + 1])
+        ):
+            # Tesseract sometimes puts a long test name and its value on
+            # separate visual rows (for example, 25-OH Vitamin D reports).
+            # Join only a recognized analyte line to a following value-first
+            # line; never bridge arbitrary lines or infer a value.
+            parsed = _parse_line(f"{line} {lines[index + 1]}")
         if parsed is not None:
             values.append(parsed)
+    return values
+
+
+def _looks_like_analyte_name(line: str) -> bool:
+    if _SKIP_CANDIDATE.search(line):
+        return False
+    letters = re.sub(r"[^A-Za-z]", "", line)
+    if len(letters) < 2 or len(line) > 64:
+        return False
+    known = any(pattern.search(line) for pattern, _ in _SYNONYMS)
+    known = known or bool(
+        re.search(
+            r"\b(?:wbc|rbc|mcv|mch|mchc|rdw|sodium|potassium|calcium|"
+            r"urea|albumin|protein|crp|ferritin|alt|ast|sgpt|sgot|bilirubin|"
+            r"alp|ggt)\b",
+            line,
+            re.IGNORECASE,
+        )
+    )
+    return known
+
+
+@dataclass(frozen=True)
+class ParsedQualitativeValue:
+    """A qualitative lab outcome kept separate from numeric trend values."""
+
+    marker: str
+    result: str
+
+
+_QUALITATIVE_RESULT = re.compile(
+    r"(?<!\w)(?P<result>normal\s+trace|slightly\s+turbid|not\s+detected|not\s+found|not\s+seen|none\s+found|"
+    r"no\s+mutation|non[- ]?reactive|negative|positive|reactive|detected|"
+    r"present|absent|abnormal|normal|trace|nil|no\s+growth|no\s+organisms|"
+    r"no\s+ova|no\s+cysts|no\s+parasites|turbid|clear|yellow|straw|amber|some|few|rare)(?!\w)",
+    re.IGNORECASE,
+)
+_ABO_GROUP_RESULT = re.compile(
+    r"\bABO\s+(?:GROUP|GROUPING)\b.*\b(?P<result>AB|A|B|O)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_qualitative_line(line: str) -> ParsedQualitativeValue | None:
+    """Read a short ``test name + qualitative result`` row without guessing.
+
+    This is deliberately separate from numeric values: qualitative outcomes
+    must never enter numeric trends or reference-range comparisons.
+    """
+    if _SKIP_CANDIDATE.search(line):
+        return None
+    cleaned = _TIME.sub(" ", _DATE.sub(" ", line.replace("|", " ").replace("\t", " ")))
+    cleaned = " ".join(cleaned.split())
+    abo_match = _ABO_GROUP_RESULT.search(cleaned)
+    match = abo_match or _QUALITATIVE_RESULT.search(cleaned)
+    if match is None:
+        return None
+    name_end = match.start("result") if abo_match is not None else match.start()
+    name = _EDGE_PUNCT.sub("", cleaned[:name_end]).strip()
+    words = re.findall(r"[A-Za-z]+", name)
+    if len(re.sub(r"[^A-Za-z]", "", name)) < 2:
+        return None
+    if len(name) > 64 or len(words) > 9:
+        return None
+    first_word = re.sub(r"[^a-z]", "", name.split()[0].lower())
+    if first_word in _NOISE_FIRST_WORDS:
+        return None
+    return ParsedQualitativeValue(
+        marker=canonical_marker(name),
+        result=" ".join(match.group("result").lower().split()),
+    )
+
+
+def parse_qualitative_lab_values(text: str | None) -> list[ParsedQualitativeValue]:
+    """Extract explicit qualitative outcomes while excluding narrative text."""
+    if not text:
+        return []
+    values = []
+    for line in text.splitlines():
+        # Numeric parsing takes precedence so a reference range containing a
+        # word such as "negative" cannot duplicate an already-read row.
+        if _parse_line(line) is None:
+            parsed = _parse_qualitative_line(line)
+            if parsed is not None:
+                values.append(parsed)
     return values
 
 
@@ -287,6 +532,8 @@ class _ReportLike(Protocol):
     id: int
     uploaded_at: datetime
     original_text: str | None
+    report_date: date | None
+    report_date_source: str | None
 
 
 @dataclass(frozen=True)
@@ -294,6 +541,7 @@ class _Observation:
     report_id: int
     at: datetime
     parsed: ParsedValue
+    date_source: str
 
 
 @dataclass(frozen=True)
@@ -344,7 +592,9 @@ _CBC = ("haemoglobin", "hemoglobin", "platelet", "wbc", "rbc", "mcv", "mchc", "m
 _LIPID = ("ldl", "hdl", "triglycerid", "cholesterol")
 _LIVER = ("alt", "ast", "sgpt", "sgot", "bilirubin", "alp", "ggt")
 _SKIP_CANDIDATE = re.compile(
-    r"patient|phone|mrn|\blab\s*id\b|\bage\b|\bsex\b|\bdate\b|\bpage\b",
+    r"patient|phone|mrn|\blab\s*id\b|\bage\b|\bsex\b|\bdate\b|\bpage\b|"
+    r"\bresult\b|\bvisit\b|\bregistered\b|\bname\b|\bcollected\b|"
+    r"\bcall\s*center\b|\btelephone\b|\bcontact\s*(?:no|number)\b",
     re.IGNORECASE,
 )
 _MISSING_VALUE = re.compile(r"(?:--+|—+|…+|\.{3,}|n/?a)\s*$", re.IGNORECASE)
@@ -375,13 +625,20 @@ def guess_panel_title(text: str, values: list[ParsedValue] | None = None) -> str
 
 
 def _candidate_count(text: str) -> int:
-    """How many lines look like a lab row, including ones the parser missed."""
+    """Count recognized result rows, including known rows with unreadable values.
+
+    Arbitrary numbers are not candidate lab values: OCR frequently turns
+    phone numbers, dates and stray page fragments into numbers.
+    """
     count = 0
     for line in text.splitlines():
         if _SKIP_CANDIDATE.search(line):
             continue
-        cleaned = _TIME.sub(" ", _DATE.sub(" ", line))
-        if _NUMBER.search(cleaned) or _is_missing_lab_value(cleaned):
+        if (
+            _parse_line(line) is not None
+            or _parse_qualitative_line(line) is not None
+            or _is_missing_lab_value(line)
+        ):
             count += 1
     return count
 
@@ -405,13 +662,14 @@ def summarise_report(text: str, sex: str | None = None) -> dict[str, object]:
     many rows were recovered so the original photo stays the source of truth.
     """
     values = parse_lab_values(text)
-    expected = max(_candidate_count(text), len(values))
+    qualitative_values = parse_qualitative_lab_values(text)
+    expected = max(_candidate_count(text), len(values) + len(qualitative_values))
     attention = 0
     for parsed in values:
         range_ = _range_of_parsed(parsed, sex)
         if _status(parsed.value, range_) != STATUS_OK:
             attention += 1
-    read = len(values)
+    read = len(values) + len(qualitative_values)
     note = None
     if expected > read:
         note = f"We read {read} of {expected} values"
@@ -473,7 +731,7 @@ def _width(range_: _Range | None, fallback: float) -> float:
 
 def _status(value: float, range_: _Range | None) -> str:
     if range_ is None:
-        return STATUS_OK
+        return "neutral"
     outside = 0.0
     if range_.high is not None and value > range_.high:
         outside = value - range_.high
@@ -530,6 +788,7 @@ class _Trend:
     first_raw: str
     last_raw: str
     first_month: str
+    last_date: str
     points_count: int
 
 
@@ -542,7 +801,8 @@ def _build_trend(marker: str, observations: list[_Observation], sex: str | None,
         {
             "report_id": observation.report_id,
             "date": observation.at.date().isoformat(),
-            "label": MONTH_ABBR[observation.at.month - 1],
+            "date_source": observation.date_source,
+            "label": observation.at.date().isoformat(),
             "value": observation.parsed.value,
             "status": status,
         }
@@ -566,7 +826,8 @@ def _build_trend(marker: str, observations: list[_Observation], sex: str | None,
         alert=alert,
         first_raw=observations[0].parsed.raw_value,
         last_raw=observations[-1].parsed.raw_value,
-        first_month=MONTH_NAMES[observations[0].at.month - 1],
+        first_month=observations[0].at.date().isoformat(),
+        last_date=observations[-1].at.date().isoformat(),
         points_count=len(observations),
     )
 
@@ -595,7 +856,8 @@ def _insight(trends: list[_Trend]) -> dict[str, object] | None:
         body = f"{marker} is outside its normal range in your latest report."
     else:
         body = (
-            f"{chosen.first_raw} in {chosen.first_month} to {chosen.last_raw} now. "
+            f"{chosen.first_raw} on {chosen.first_month} to {chosen.last_raw} "
+            f"on {chosen.last_date}. "
             "Worth raising with your doctor."
         )
     return {"marker": marker, "title": title, "body": body}
@@ -613,7 +875,15 @@ def build_risk_trends(
     ``user`` supplies ``sex_at_birth`` (default ranges) and ``conditions``
     (focus markers). ``now`` pins ``generated_at`` in tests.
     """
-    ordered = sorted(reports, key=lambda report: (report.uploaded_at, report.id))
+    def effective_date(report: _ReportLike) -> datetime:
+        report_date = getattr(report, "report_date", None)
+        if getattr(report, "report_date_source", None) == "report" and report_date:
+            if isinstance(report_date, datetime):
+                return report_date
+            return datetime.combine(report_date, datetime.min.time(), tzinfo=report.uploaded_at.tzinfo)
+        return report.uploaded_at
+
+    ordered = sorted(reports, key=lambda report: (effective_date(report), report.uploaded_at, report.id))
     sex = _sex_of(user)
     focus = focus_markers(getattr(user, "conditions", None))
 
@@ -625,7 +895,12 @@ def build_risk_trends(
                 continue  # first row of a marker on a report wins
             seen.add(parsed.marker)
             series.setdefault(parsed.marker, []).append(
-                _Observation(report.id, report.uploaded_at, parsed)
+                _Observation(
+                    report.id,
+                    effective_date(report),
+                    parsed,
+                    "report" if getattr(report, "report_date_source", None) == "report" and getattr(report, "report_date", None) else "upload",
+                )
             )
 
     trends = [

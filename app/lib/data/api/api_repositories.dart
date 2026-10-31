@@ -27,6 +27,13 @@ class ApiReportsRepository implements ReportsRepository {
   final Map<int, String> _parseNotes = <int, String>{};
 
   @override
+  Future<void> clearHealthData() async {
+    _dates.clear();
+    _titles.clear();
+    _parseNotes.clear();
+  }
+
+  @override
   Future<List<LabReport>> listReports() => _guard(() async {
     final List<ReportSummary> rows = await _api.fetchReports();
     return rows.map((row) {
@@ -64,16 +71,31 @@ class ApiReportsRepository implements ReportsRepository {
   Future<LabReport> uploadReport(
     String filePath, {
     ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
     void Function(UploadPhase phase)? onPhase,
   }) => _guard(() async {
     onPhase?.call(UploadPhase.uploading);
     final OcrUploadResult ocr = await _api.uploadReport(
       filePath,
       language: language.apiValue,
+      uploadId: uploadId,
     );
     onPhase?.call(UploadPhase.explaining);
-    final SimplifyResult simplified = await _api.simplifyReport(ocr.id);
     _dates[ocr.id] = 'Today';
+    late final SimplifyResult simplified;
+    try {
+      simplified = await _api.simplifyReport(ocr.id);
+    } on ApiException {
+      // OCR upload already committed the report. Keep it reachable in the
+      // history and navigate to its detail, where the idempotent explain call
+      // can be retried without uploading the same file a second time.
+      return _fromOcr(
+        ocr,
+        dateLabel: 'Today',
+        date: DateTime.now(),
+        language: language,
+      );
+    }
     return _detail(
       simplified,
       dateLabel: 'Today',
@@ -83,19 +105,58 @@ class ApiReportsRepository implements ReportsRepository {
     );
   });
 
+  LabReport _fromOcr(
+    OcrUploadResult result, {
+    required String dateLabel,
+    required DateTime date,
+    required ReportLanguage language,
+  }) {
+    final List<ReportValue> values = parseLabValues(result.text);
+    final int attention = values
+        .where(
+          (value) =>
+              value.status == ValueStatus.warn ||
+              value.status == ValueStatus.error,
+        )
+        .length;
+    final (ValueStatus status, String statusText) = values.isEmpty
+        ? (ValueStatus.neutral, 'Explanation pending')
+        : attention == 0
+        ? (ValueStatus.ok, 'All normal')
+        : (
+            ValueStatus.warn,
+            attention == 1 ? '1 needs attention' : '$attention need attention',
+          );
+    return LabReport(
+      id: result.id,
+      title: guessReportTitle(result.text),
+      dateLabel: dateLabel,
+      date: date,
+      status: status,
+      statusText: statusText,
+      attentionCount: attention,
+      values: values,
+      originalText: result.text,
+      confidence: result.confidence,
+      hasSimplified: false,
+      language: language,
+    );
+  }
+
   @override
   Future<LabReport> getReport(int id) => _guard(() async {
     // `/simplify-report` is idempotent: a second call returns the stored
     // text, so it doubles as "fetch detail".
     final SimplifyResult simplified = await _api.simplifyReport(id);
     String? date = _dates[id];
-    if (date == null) {
-      try {
-        await listReports();
-        date = _dates[id];
-      } on RepositoryException {
-        // The detail is still useful without a date.
-      }
+    try {
+      // Refresh parse coverage too: the deterministic OCR parser may have
+      // improved since this report was uploaded, while the in-memory list
+      // cache still holds the older counts.
+      await listReports();
+      date = _dates[id] ?? date;
+    } on RepositoryException {
+      // The detail is still useful without refreshed list metadata.
     }
     return _detail(simplified, dateLabel: date ?? 'Report $id');
   });

@@ -293,34 +293,66 @@ def extract_text(
             "Tesseract traineddata files and try again."
         )
 
-    data = pytesseract.image_to_data(
-        prepared,
-        lang=tesseract_language,
-        config=_TESSERACT_CONFIG,
-        output_type=Output.DICT,
-    )
+    primary = _read_pass(prepared, tesseract_language, _TESSERACT_CONFIG)
+    result_text, mean_confidence = primary
 
-    words: list[str] = []
-    confidences: list[float] = []
-    for word, confidence in zip(data["text"], data["conf"]):
-        stripped = word.strip()
-        if not stripped:
-            continue
-        if _is_noise(stripped, float(confidence)):
-            continue
-        words.append(stripped)
-        if confidence >= 0:
-            confidences.append(float(confidence))
-
-    mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    # Sparse or uncertain pages often have a table/layout that PSM 4 segments
+    # poorly. Retry those pages with Tesseract's single-block layout and keep
+    # the pass that yields more supported lab rows, using confidence as a tie
+    # breaker. Dense, clear reports still pay for only one OCR pass.
+    if mean_confidence < 65 or _recognized_row_count(result_text) < 2:
+        alternate = _read_pass(prepared, tesseract_language, "--oem 3 --psm 6")
+        if _pass_score(alternate) > _pass_score(primary):
+            result_text, mean_confidence = alternate
 
     return OcrResult(
-        text=" ".join(words),
+        # Keep each Tesseract line intact: the trend parser expects a marker,
+        # result, units and range to stay on their printed report row.
+        text=result_text,
         confidence=round(mean_confidence, 2),
         width=prepared.width,
         height=prepared.height,
         skew_degrees=round(skew, 2),
     )
+
+
+def _read_pass(
+    image: Image.Image, language: str, config: str
+) -> tuple[str, float]:
+    data = pytesseract.image_to_data(
+        image, lang=language, config=config, output_type=Output.DICT
+    )
+    lines: dict[tuple[int, int, int], list[str]] = {}
+    confidences: list[float] = []
+    for index, (word, confidence) in enumerate(zip(data["text"], data["conf"], strict=True)):
+        stripped = word.strip()
+        if not stripped or _is_noise(stripped, float(confidence)):
+            continue
+        line_key = (
+            int(data["block_num"][index]),
+            int(data["par_num"][index]),
+            int(data["line_num"][index]),
+        )
+        lines.setdefault(line_key, []).append(stripped)
+        if confidence >= 0:
+            confidences.append(float(confidence))
+    text = "\n".join(" ".join(words) for words in lines.values())
+    confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    return text, round(confidence, 2)
+
+
+def _recognized_row_count(text: str) -> int:
+    # Local import avoids loading the trend engine unless a sparse page needs
+    # a fallback pass. Numeric and qualitative lab rows both count as useful
+    # extraction; qualitative values are kept out of numeric trend analysis.
+    from trends import parse_lab_values, parse_qualitative_lab_values
+
+    return len(parse_lab_values(text)) + len(parse_qualitative_lab_values(text))
+
+
+def _pass_score(result: tuple[str, float]) -> tuple[int, float]:
+    text, confidence = result
+    return _recognized_row_count(text), confidence
 
 _HAS_DIGIT = re.compile(r"\d")
 

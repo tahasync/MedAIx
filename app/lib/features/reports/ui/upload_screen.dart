@@ -102,9 +102,13 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
     const ScreenHeader uploadHeader = ScreenHeader(title: 'Upload report');
 
     final (Widget header, Widget body) = switch (state) {
-      UploadInProgress(:final phase) => (
-        ScreenHeader(title: 'Reading your report', subtitle: phase.label),
-        _ReadingView(key: const ValueKey<String>('reading'), phase: phase),
+      UploadInProgress(:final phase, :final fileName) => (
+        ScreenHeader(title: phase.title, subtitle: phase.label),
+        _ReadingView(
+          key: const ValueKey<String>('reading'),
+          phase: phase,
+          fileName: fileName,
+        ),
       ),
       UploadFailure(:final message, :final canRetry) => (
         uploadHeader,
@@ -112,7 +116,9 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
           key: const ValueKey<String>('failure'),
           title: 'Couldn’t read this photo',
           message: message,
-          dataSafety: 'Nothing was saved, and your existing reports are safe.',
+          dataSafety:
+              'Retrying this upload uses the same request id, so it will not '
+              'create a duplicate report. Your other reports are safe.',
           onPrimary: canRetry
               ? () => ref.read(uploadControllerProvider.notifier).retry()
               : null,
@@ -228,9 +234,10 @@ class _PickView extends StatelessWidget {
 /// Reading state: progress card, then a skeleton shaped like the Report
 /// screen (summary card + three value rows).
 class _ReadingView extends StatelessWidget {
-  const _ReadingView({super.key, required this.phase});
+  const _ReadingView({super.key, required this.phase, required this.fileName});
 
   final UploadPhase phase;
+  final String fileName;
 
   @override
   Widget build(BuildContext context) {
@@ -238,13 +245,55 @@ class _ReadingView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         AppCard(
-          child: ProgressBar(
-            value: phase.progress,
-            semanticLabel: 'Reading your report',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  IconTile(icon: LucideIcons.fileText),
+                  const SizedBox(width: AppSpace.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpace.lg),
+              Semantics(
+                label: phase.label,
+                liveRegion: true,
+                child: LinearProgressIndicator(
+                  minHeight: AppSize.progressBar,
+                  backgroundColor: context.colors.surface2,
+                  color: context.colors.primary,
+                ),
+              ),
+              const SizedBox(height: AppSpace.md),
+              Text(
+                'This can take a little while. Your report stays saved if '
+                'the explanation needs a retry.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: AppSpace.cardGap),
-        const ScreenSkeleton(rows: 3),
+        const SkeletonCard(height: 136),
+        const SizedBox(height: AppSpace.gridGap),
+        const SkeletonBox(height: 60),
+        const SizedBox(height: AppSpace.gridGap),
+        const SkeletonBox(height: 60),
       ],
     );
   }

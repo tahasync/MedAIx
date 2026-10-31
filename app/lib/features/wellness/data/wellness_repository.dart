@@ -61,12 +61,13 @@ class WellnessDay {
   /// What would lift the score next, for the Home card subtitle.
   String get nextStep {
     if (waterGoalMl != null && waterProgress < 1) {
-      final int target = (habitScore + 8).clamp(0, 100);
-      return 'Log water to reach $target today';
+      return 'Next: log water toward your daily goal.';
     }
-    if (exerciseLabel == null) return 'Log a walk to finish today';
-    if (stepProgress < 1) return 'Keep walking to hit your step goal';
-    return 'All habits done for today';
+    if (exerciseLabel == null) {
+      return 'Next: log movement when it feels comfortable.';
+    }
+    if (stepProgress < 1) return 'Keep moving at a comfortable pace.';
+    return 'You’ve logged water, steps and movement today.';
   }
 
   WellnessDay copyWith({

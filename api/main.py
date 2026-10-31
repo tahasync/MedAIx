@@ -9,16 +9,24 @@ dependency-free. Feature endpoints land in their own sprint: Sprint 1 added
 import io
 import logging
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
+from anemia_model import (
+    AnemiaModelUnavailable,
+    load_model as load_anemia_model,
+    out_of_training_range as anemia_out_of_range,
+    predict_probability as predict_anemia_score,
+    screening_enabled as anemia_screening_enabled,
+)
 from database import (
     SQLALCHEMY_DATABASE_URL,
     Base,
@@ -28,6 +36,13 @@ from database import (
     get_db,
     rename_legacy_user_uid,
     warn_if_ephemeral,
+)
+from dengue_model import (
+    DengueModelUnavailable,
+    load_model as load_dengue_model,
+    out_of_training_range as dengue_out_of_range,
+    predict_probability as predict_dengue_score,
+    screening_enabled as dengue_screening_enabled,
 )
 from models import (  # noqa: F401
     Medicine,
@@ -47,7 +62,7 @@ from profile import (
 )
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from simplify import SimplifyResult, simplify_text
-from trends import build_risk_trends, summarise_report
+from trends import build_risk_trends, extract_report_date, summarise_report
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +185,10 @@ async def upload_report(
         OcrLanguage,
         Form(description="OCR mode: English, Urdu script, or Roman Urdu"),
     ] = OcrLanguage.ENGLISH,
+    upload_id: Annotated[
+        str | None,
+        Form(max_length=80, description="Client id used to safely retry an upload"),
+    ] = None,
 ) -> dict[str, object]:
     """Accept a lab report, extract its text, and store the raw OCR result.
 
@@ -177,6 +196,37 @@ async def upload_report(
     plain language is Sprint 2 (`/simplify-report`); Sprint 1 deliberately stops
     at raw extraction so the two can be measured separately.
     """
+    upload_id = upload_id.strip() if upload_id else None
+    if upload_id == "":
+        raise HTTPException(status_code=422, detail="Choose a report to upload.")
+
+    # A phone may lose the response after the report was committed. Reusing
+    # its client id returns that stored row and makes retries safe.
+    if upload_id is not None:
+        existing = (
+            db.query(Report)
+            .filter(
+                Report.user_id == user.id,
+                Report.client_upload_id == upload_id,
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            return {
+                "id": existing.id,
+                "text": existing.original_text or "",
+                "language": language.value,
+                "confidence": existing.ocr_confidence or 0,
+                "width": None,
+                "height": None,
+                "skew_corrected_degrees": 0,
+                "title": existing.title or existing.derived_title,
+                "attention_count": existing.attention_count or 0,
+                "values_read": existing.values_read,
+                "values_expected": existing.values_expected,
+                "parse_note": existing.parse_note,
+            }
+
     payload = await file.read()
     if not payload:
         raise HTTPException(
@@ -215,11 +265,43 @@ async def upload_report(
         original_text=result.text,
         ocr_confidence=result.confidence,
         image_path=file.filename,
+        client_upload_id=upload_id,
     )
     db.add(report)
-    db.flush()
-    _stamp_report(report, user)
-    db.commit()
+    try:
+        db.flush()
+        _stamp_report(report, user)
+        db.commit()
+    except IntegrityError:
+        # Two retries can race past the initial lookup. The unique key keeps
+        # one row; resolve the losing request to the winner's stored report.
+        db.rollback()
+        if upload_id is None:
+            raise
+        existing = (
+            db.query(Report)
+            .filter(
+                Report.user_id == user.id,
+                Report.client_upload_id == upload_id,
+            )
+            .one_or_none()
+        )
+        if existing is None:
+            raise
+        return {
+            "id": existing.id,
+            "text": existing.original_text or "",
+            "language": language.value,
+            "confidence": existing.ocr_confidence or 0,
+            "width": None,
+            "height": None,
+            "skew_corrected_degrees": 0,
+            "title": existing.title or existing.derived_title,
+            "attention_count": existing.attention_count or 0,
+            "values_read": existing.values_read,
+            "values_expected": existing.values_expected,
+            "parse_note": existing.parse_note,
+        }
 
     return {
         "id": report.id,
@@ -272,17 +354,10 @@ def simplify_report(
             detail="That report has no readable text to simplify.",
         )
 
-    # Return a previous simplification instead of redoing the work.
-    if report.simplified_text:
-        return {
-            "id": report.id,
-            "original_text": report.original_text,
-            "simplified_text": report.simplified_text,
-            "terms_simplified": None,
-            "sentence_count": None,
-            "note": "Previously simplified.",
-        }
-
+    # Re-run the deterministic pipeline on detail reads. Besides keeping the
+    # result current when the NLP rules improve, this also upgrades old stored
+    # OCR rewrites that exposed the whole noisy page as a "summary".
+    was_simplified = bool(report.simplified_text)
     result: SimplifyResult = simplify_text(report.original_text)
 
     report.simplified_text = result.simplified_text
@@ -295,7 +370,7 @@ def simplify_report(
         "simplified_text": result.simplified_text,
         "terms_simplified": result.terms_simplified,
         "sentence_count": result.sentence_count,
-        "note": result.note,
+        "note": "Previously simplified." if was_simplified else result.note,
     }
 
 
@@ -317,10 +392,7 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
             Report.title,
             Report.derived_title,
             Report.report_date,
-            Report.attention_count,
-            Report.values_read,
-            Report.values_expected,
-            Report.parse_note,
+            Report.report_date_source,
             Report.original_text,
         )
         .filter(Report.user_id == user.id)
@@ -337,28 +409,31 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
         title,
         derived_title,
         report_date,
-        attention_count,
-        values_read,
-        values_expected,
-        parse_note,
+        report_date_source,
         original_text,
     ) in rows:
-        panel = derived_title or summarise_report(original_text or "")["title"]
-        day = report_date or (uploaded_at.date() if uploaded_at else None)
+        current_summary = summarise_report(
+            original_text or "",
+            getattr(user, "sex_at_birth", None) or getattr(user, "sex", None),
+        )
+        panel = derived_title or current_summary["title"]
+        has_report_date = report_date_source == "report" and report_date is not None
+        day = report_date if has_report_date else (uploaded_at.date() if uploaded_at else None)
         listed.append(
             {
                 "id": report_id,
                 "title": title or panel,
                 "derived_title": panel,
                 "report_date": day.isoformat() if day else None,
+                "report_date_source": "report" if has_report_date else "upload",
                 "uploaded_at": uploaded_at.isoformat(),
                 "confidence": confidence,
                 "has_simplified": simplified_length > 0,
                 "image_path": image_path,
-                "attention_count": attention_count or 0,
-                "values_read": values_read,
-                "values_expected": values_expected,
-                "parse_note": parse_note,
+                "attention_count": current_summary["attention_count"],
+                "values_read": current_summary["values_read"],
+                "values_expected": current_summary["values_expected"],
+                "parse_note": current_summary["parse_note"],
             }
         )
     return listed
@@ -402,7 +477,8 @@ def _stamp_report(report: Report, user: User) -> None:
         getattr(user, "sex_at_birth", None) or getattr(user, "sex", None),
     )
     report.derived_title = str(summary["title"])
-    report.report_date = (report.uploaded_at or utc_now()).date()
+    report.report_date = extract_report_date(report.original_text)
+    report.report_date_source = "report" if report.report_date else None
     report.attention_count = int(summary["attention_count"])
     report.values_read = int(summary["values_read"])
     report.values_expected = int(summary["values_expected"])
@@ -700,10 +776,117 @@ def risk_trends(user: CurrentUser, db: DbSession) -> dict[str, object]:
     can show "1 report so far", but never raise an alert.
     """
     rows = (
-        db.query(Report.id, Report.uploaded_at, Report.original_text)
+        db.query(
+            Report.id,
+            Report.uploaded_at,
+            Report.original_text,
+            Report.report_date,
+            Report.report_date_source,
+        )
         .filter(Report.user_id == user.id)
         .order_by(Report.uploaded_at, Report.id)
         .all()
     )
     return build_risk_trends(user, rows)
+
+
+class ExperimentalDengueScreeningInput(BaseModel):
+    """Values in the same fields and scales used by the local training CSV."""
+
+    age: float = Field(gt=0, le=120)
+    gender: Literal["Female", "Male", "Child"]
+    hemoglobin_g_dl: float | None = Field(default=None, gt=0)
+    wbc_count: float | None = Field(default=None, gt=0)
+    platelet_count: float | None = Field(default=None, gt=0)
+    platelet_distribution_width: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def require_measured_values(self) -> "ExperimentalDengueScreeningInput":
+        supplied = sum(
+            value is not None
+            for value in (
+                self.hemoglobin_g_dl,
+                self.wbc_count,
+                self.platelet_count,
+                self.platelet_distribution_width,
+            )
+        )
+        if supplied < 3:
+            raise ValueError("Provide at least three measured blood-count values.")
+        return self
+
+
+@app.post("/experimental/dengue-screening")
+def experimental_dengue_screening(
+    payload: ExperimentalDengueScreeningInput, user: CurrentUser
+) -> dict[str, object]:
+    """Run the local dataset classifier only after explicit server opt-in.
+
+    This endpoint is isolated from report uploads and existing alerts. It
+    returns no diagnosis, risk tier, or treatment recommendation.
+    """
+    del user  # Authentication is required; patient data is never logged/stored.
+    if not dengue_screening_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="Experimental dengue screening is not enabled on this server.",
+        )
+    try:
+        model = load_dengue_model()
+    except DengueModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    values = payload.model_dump()
+    score = predict_dengue_score(values, model)
+    outside = dengue_out_of_range(values, model)
+    return {
+        "status": "experimental_dataset_model",
+        "model_version": model["model_version"],
+        "positive_label_score": round(score, 4),
+        "outside_training_range": outside,
+        "notice": (
+            "Research/demo output only. This dataset has no verified external "
+            "clinical validation. This score is not a diagnosis, calibrated "
+            "patient risk, or treatment recommendation."
+        ),
+    }
+
+
+class ExperimentalAnemiaScreeningInput(BaseModel):
+    """CBC features used by the local experimental training dataset."""
+
+    hemoglobin: float = Field(gt=0, le=40)
+    mch: float = Field(gt=0, le=100)
+    mchc: float = Field(gt=0, le=100)
+    mcv: float = Field(gt=0, le=200)
+
+
+@app.post("/experimental/anemia-screening")
+def experimental_anemia_screening(
+    payload: ExperimentalAnemiaScreeningInput, user: CurrentUser
+) -> dict[str, object]:
+    """Return a local dataset score after explicit server opt-in only."""
+    del user  # Authentication is required; patient values are not logged/stored.
+    if not anemia_screening_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="Experimental anemia screening is not enabled on this server.",
+        )
+    try:
+        model = load_anemia_model()
+    except AnemiaModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    values = payload.model_dump()
+    return {
+        "status": "experimental_dataset_model",
+        "model_version": model["model_version"],
+        "positive_label_score": round(predict_anemia_score(values, model), 4),
+        "outside_training_range": anemia_out_of_range(values, model),
+        "notice": (
+            "Research/demo output only. The supplied dataset has no verified "
+            "external clinical validation. This score is not a diagnosis, "
+            "calibrated patient risk, or treatment recommendation."
+        ),
+    }
 

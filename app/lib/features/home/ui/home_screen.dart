@@ -270,7 +270,8 @@ class _TileRow extends StatelessWidget {
   }
 }
 
-/// Mockup habit card: ring, "Habit score 72", next step, chevron.
+/// Home habit summary: a useful activity mark, explicit score, real progress,
+/// next step, and a clear route into Wellness.
 class _HabitCard extends StatelessWidget {
   const _HabitCard({super.key, required this.day});
 
@@ -284,9 +285,11 @@ class _HabitCard extends StatelessWidget {
     return AppCard(
       child: Row(
         children: [
-          ScoreRing(
-            value: score / 100,
-            semanticLabel: 'Habit score $score of 100',
+          const IconTile(
+            icon: LucideIcons.activity,
+            size: 64,
+            iconSize: 30,
+            radius: AppRadius.tile,
           ),
           const SizedBox(width: AppSpace.lg),
           Expanded(
@@ -298,6 +301,11 @@ class _HabitCard extends StatelessWidget {
                 Text(
                   day.nextStep,
                   style: text.bodySmall?.copyWith(color: c.muted),
+                ),
+                const SizedBox(height: AppSpace.md),
+                ProgressBar(
+                  value: score / 100,
+                  semanticLabel: 'Habit score progress: $score of 100',
                 ),
               ],
             ),

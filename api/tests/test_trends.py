@@ -4,7 +4,7 @@ Pure functions, no database: reports are plain namespaces with ``id``,
 ``uploaded_at`` and ``original_text``.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +16,9 @@ from trends import (
     focus_markers,
     guess_panel_title,
     parse_lab_values,
+    parse_qualitative_lab_values,
     summarise_report,
+    extract_report_date,
 )
 
 NOW = datetime(2026, 10, 25, 16, 0, 0)
@@ -27,6 +29,8 @@ def _report(report_id: int, month: int, text: str) -> SimpleNamespace:
         id=report_id,
         uploaded_at=datetime(2026, month, 2, 9, 30),
         original_text=text,
+        report_date=None,
+        report_date_source=None,
     )
 
 
@@ -106,6 +110,168 @@ def test_parser_tolerates_ocr_noise() -> None:
     assert [row.value for row in parsed] == [14.2, 245.0, 5.9, 350.0, 140.0]
     assert parsed[1].unit == "10*9/L"
     assert (parsed[3].low, parsed[3].high) == (200.0, 900.0)
+
+
+@pytest.mark.parametrize(
+    ("line", "marker", "result"),
+    [
+        ("Helicobacter pylori antigen (in stool) Positive Negative", "Helicobacter Pylori Antigen (in Stool)", "positive"),
+        ("Indirect Coombs Test Negative Negative", "Indirect Coombs Test", "negative"),
+        ("Familial Mediterranean Fever Gene No mutation", "Familial Mediterranean Fever Gene", "no mutation"),
+        ("Albumin Trace", "Albumin", "trace"),
+        ("Glucose Nil", "Glucose", "nil"),
+        ("Colour Yellow", "Colour", "yellow"),
+        ("Aspect Slightly Turbid", "Aspect", "slightly turbid"),
+        ("Urobilinogen Normal Trace", "Urobilinogen", "normal trace"),
+        ("ABO GROUP (EDTA Blood) B", "ABO GROUP (EDTA Blood)", "b"),
+    ],
+)
+def test_parser_reads_qualitative_lab_rows_without_numeric_conversion(
+    line: str, marker: str, result: str
+) -> None:
+    [parsed] = parse_qualitative_lab_values(line)
+
+    assert (parsed.marker, parsed.result) == (marker, result)
+    assert parse_lab_values(line) == []
+
+
+def test_parser_canonicalizes_long_numeric_markers_seen_in_reports() -> None:
+    psa = parse_lab_values("Prostatic Specific Antigen (Total PSA) 0.306 ng/mL. Up To 4")
+    vitamin_d = parse_lab_values("25-hydroxyvitamin D (Vitamin D) 25.0 ng/mL")
+
+    assert [(row.marker, row.value) for row in psa] == [("PSA", 0.306)]
+    assert [(row.marker, row.value) for row in vitamin_d] == [("Vitamin D", 25.0)]
+
+
+def test_parser_canonicalizes_analyte_aliases_seen_in_test_reports() -> None:
+    text = (
+        "C-reactive Protein (CRP) Titre 3 mg/L\n"
+        "Alpha Feto Protein (AFP) 4.18 ng/mL\n"
+        "CK (total) 92 U/L\n"
+        "Calprotectin In Stool (quantitative) 401 ug/g\n"
+        "Ferritin In Serum 35.3 ng/mL\n"
+        "Antistreptolysin O Titre (ASOT) 226.90 IU/mL\n"
+        "Serum Uric Acid 46 mg/L"
+    )
+
+    assert [(row.marker, row.value) for row in parse_lab_values(text)] == [
+        ("CRP", 3.0),
+        ("Alpha Feto Protein", 4.18),
+        ("CK Total", 92.0),
+        ("Calprotectin", 401.0),
+        ("Ferritin", 35.3),
+        ("ASOT", 226.90),
+        ("Uric Acid", 46.0),
+    ]
+
+
+def test_parser_joins_known_marker_to_following_value_only_when_value_leads_line() -> None:
+    parsed = parse_lab_values("25 hydroxyvitamin D3 (Vitamin D)\n10.9 | ng/mL Deficient")
+
+    assert [(row.marker, row.value, row.unit) for row in parsed] == [
+        ("Vitamin D", 10.9, "ng/mL")
+    ]
+
+
+def test_summary_counts_qualitative_rows_but_trends_remain_numeric_only() -> None:
+    text = "Indirect Coombs Test Negative Negative\nHelicobacter pylori antigen Positive Negative"
+    summary = summarise_report(text)
+
+    assert summary["values_read"] == 2
+    assert summary["values_expected"] == 2
+    assert summary["parse_note"] is None
+    assert build_risk_trends(_user(), [_report(1, 1, text)]) ["trends"] == []
+
+
+def test_parser_ignores_result_heading_with_malformed_ocr_date() -> None:
+    text = (
+        "RESULT HAEMATOLOGY REPORT: 1696:9:2026 14-Sep-26 21:40 "
+        "BLOOD COMPLETE COUNT Hemoglobin ..."
+    )
+
+    assert parse_lab_values(text) == []
+    summary = summarise_report(text)
+    assert summary["values_read"] == 0
+    assert summary["values_expected"] == 0
+    assert summary["attention_count"] == 0
+
+
+def test_parser_ignores_numbers_on_patient_administration_lines() -> None:
+    text = (
+        "BON Gules Als Adega Al Mokhtabar Moamena Kamel Lab "
+        "Jol Patient NAME Registered Collected Authenticated Printed "
+        "Visit Number Age Gender Referred By Client ID 31"
+    )
+
+    assert parse_lab_values(text) == []
+    summary = summarise_report(text)
+    assert summary["values_read"] == 0
+    assert summary["values_expected"] == 0
+    assert summary["attention_count"] == 0
+
+
+def test_parser_ignores_call_center_numbers_as_lab_results() -> None:
+    text = (
+        "Immunology Unit Ref. Range\n"
+        "Ferritin in Blood 53.0 ng/mL 10 - 120\n"
+        "Call Center - 161"
+    )
+
+    parsed = parse_lab_values(text)
+
+    assert [row.marker for row in parsed] == ["Ferritin In Blood"]
+    summary = summarise_report(text)
+    assert summary["values_read"] == 1
+    assert summary["values_expected"] == 1
+
+
+def test_candidate_count_ignores_ocr_age_date_and_phone_fragments() -> None:
+    text = (
+        "Immunology Unit / Ref. Range\n"
+        "Ferritin in Serum 53.0 ng/mL 10 - 120\n"
+        "15/12/2020:22200\n"
+        "2 ely\n"
+        "57 Y\n"
+        "Call Center - 161"
+    )
+
+    summary = summarise_report(text)
+
+    assert summary["values_read"] == 1
+    assert summary["values_expected"] == 1
+
+
+def test_parser_rejects_unknown_marker_and_unanchored_ocr_number() -> None:
+    assert parse_lab_values("Cad �) OTNEZ1BS poe (24)") == []
+
+
+def test_unknown_marker_still_requires_a_unit_or_printed_range() -> None:
+    [parsed] = parse_lab_values("Sodium 140 mmol/L")
+    assert parsed.marker == "Sodium"
+    assert parse_lab_values("Noise label 140") == []
+
+
+def test_parser_rejects_ocr_header_as_a_marker() -> None:
+    assert parse_lab_values(
+        "G AI Aul X= Ge Te Oda Gl Guu = = Visit Number: 42 "
+        "Registered Patient Name: Collected Age / Sex"
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Collection date: 2026-10-26", date(2026, 10, 26)),
+        ("Date of report: Oct 26, 2026", date(2026, 10, 26)),
+        ("Sampled 26 Oct 2026", date(2026, 10, 26)),
+        ("DOB: 1990-01-02\nDate: 2026-10-26", date(2026, 10, 26)),
+        ("Date: 03/04/2026", None),
+        ("DOB: 1990-01-02\nDate of birth: 1990-01-02", None),
+        ("Unlabelled 2026-10-26", None),
+    ],
+)
+def test_extract_report_date_only_uses_clear_label(text: str, expected: date | None) -> None:
+    assert extract_report_date(text) == expected
 
 
 def test_parser_ignores_lines_without_a_number() -> None:
@@ -263,7 +429,9 @@ def test_unknown_marker_without_a_range_is_listed_but_never_flagged() -> None:
     trend = _trend(result, "Sodium")
     assert trend["range"] is None
     assert trend["alert"] is None
-    assert [point["status"] for point in trend["points"]] == ["ok", "ok", "ok"]
+    assert [point["status"] for point in trend["points"]] == [
+        "neutral", "neutral", "neutral"
+    ]
 
 
 # ---- alerts ---------------------------------------------------------------------
@@ -288,9 +456,35 @@ def test_rising_streak_alert_and_insight() -> None:
     assert result["insight"] == {
         "marker": "HbA1c",
         "title": "Your HbA1c has risen across 3 reports",
-        "body": "5.9 in January to 6.4 now. Worth raising with your doctor.",
+            "body": "5.9 on 2026-01-02 to 6.4 on 2026-03-02. Worth raising with your doctor.",
     }
-    assert [point["label"] for point in trend["points"]] == ["Jan", "Feb", "Mar"]
+    assert [point["label"] for point in trend["points"]] == [
+        "2026-01-02", "2026-02-02", "2026-03-02"
+    ]
+    assert [point["date_source"] for point in trend["points"]] == [
+        "upload", "upload", "upload"
+    ]
+
+
+def test_trend_prefers_verified_report_date_and_sorts_by_it() -> None:
+    early_upload = _report(1, 10, "HbA1c 5.9 %")
+    early_upload.report_date = date(2026, 3, 2)
+    early_upload.report_date_source = "report"
+    late_upload = _report(2, 3, "HbA1c 6.1 %")
+    late_upload.report_date = date(2026, 10, 20)
+    late_upload.report_date_source = "report"
+
+    points = _trend(build_risk_trends(_user(), [early_upload, late_upload]), "HbA1c")["points"]
+
+    assert [point["date"] for point in points] == ["2026-03-02", "2026-10-20"]
+    assert [point["date_source"] for point in points] == ["report", "report"]
+
+
+def test_unknown_marker_without_range_is_unrated() -> None:
+    trend = _trend(build_risk_trends(_user(), _series("Ferritin {}", "80")), "Ferritin")
+
+    assert trend["range"] is None
+    assert trend["points"][0]["status"] == "neutral"
     assert trend["points"][0]["date"] == "2026-01-02"
 
 
@@ -322,7 +516,7 @@ def test_falling_streak_alert() -> None:
     assert trend["alert"]["code"] == "falling_streak"
     assert trend["alert"]["level"] == "error"
     assert result["insight"]["title"] == "Your Haemoglobin has fallen across 3 reports"
-    assert result["insight"]["body"] == "14.0 in January to 12.0 now. Worth raising with your doctor."
+    assert result["insight"]["body"] == "14.0 on 2026-01-02 to 12.0 on 2026-03-02. Worth raising with your doctor."
 
 
 def test_crossed_high_alert() -> None:
@@ -334,7 +528,7 @@ def test_crossed_high_alert() -> None:
     assert result["insight"] == {
         "marker": "Fasting glucose",
         "title": "Your Fasting glucose is now above its normal range",
-        "body": "92 in January to 100 now. Worth raising with your doctor.",
+            "body": "92 on 2026-01-02 to 100 on 2026-02-02. Worth raising with your doctor.",
     }
 
 
@@ -456,13 +650,15 @@ def test_reports_are_ordered_by_upload_date_not_input_order() -> None:
     result = build_risk_trends(_user(), reports, now=NOW)
 
     assert [point["report_id"] for point in _trend(result, "HbA1c")["points"]] == [1, 2, 3]
-    assert result["insight"]["body"].startswith("5.9 in March to 6.4 now.")
+    assert result["insight"]["body"].startswith(
+        "5.9 on 2026-03-02 to 6.4 on 2026-09-02."
+    )
 
 
 def test_values_are_echoed_exactly_as_printed() -> None:
     result = build_risk_trends(_user(), _series("HbA1c {} %", "5.90", "6.10", "6.40"), now=NOW)
 
-    assert result["insight"]["body"] == "5.90 in January to 6.40 now. Worth raising with your doctor."
+    assert result["insight"]["body"] == "5.90 on 2026-01-02 to 6.40 on 2026-03-02. Worth raising with your doctor."
     assert [point["value"] for point in _trend(result, "HbA1c")["points"]] == [5.9, 6.1, 6.4]
 
 

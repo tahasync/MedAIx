@@ -6,9 +6,10 @@ Runs against an isolated SQLite file so a local `medaix.db` is never touched.
 import io
 import os
 from datetime import date, datetime
+from uuid import uuid4
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import create_engine, inspect, text
@@ -186,6 +187,8 @@ def test_upload_report_extracts_and_stores_text(client: TestClient) -> None:
     # OCR of clean synthetic print should comfortably clear the floor.
     assert body["confidence"] >= 30.0
     assert "Haemoglobin" in body["text"]
+    assert body["values_read"] >= 2
+    assert len(body["text"].splitlines()) >= 4
     assert body["width"] > 0
     stored = SessionLocal()
     try:
@@ -225,6 +228,46 @@ def test_upload_report_passes_selected_language(
     assert response.status_code == 200
     assert selected == [language]
     assert response.json()["language"] == language
+
+
+def test_upload_report_retry_with_same_client_id_returns_saved_report(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost upload response can be retried without creating another row."""
+    calls = 0
+
+    def fake_extract(image: Image.Image, *, language):
+        nonlocal calls
+        calls += 1
+        return main_module.OcrResult(
+            text="Haemoglobin 13.2 g/dL",
+            confidence=88.0,
+            width=image.width,
+            height=image.height,
+            skew_degrees=0.0,
+        )
+
+    monkeypatch.setattr(main_module, "extract_text", fake_extract)
+    payload = _lab_report_image()
+    upload_id = f"retry-safe-{uuid4().hex}"
+    first = client.post(
+        "/upload-report",
+        data={"upload_id": upload_id},
+        files={"file": ("report.png", payload, "image/png")},
+    )
+    second = client.post(
+        "/upload-report",
+        data={"upload_id": upload_id},
+        files={"file": ("report.png", payload, "image/png")},
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert calls == 1
+    assert sum(
+        report["id"] == first.json()["id"] for report in client.get("/reports").json()
+    ) == 1
 
 
 def test_upload_report_defaults_to_english(client: TestClient) -> None:
@@ -437,6 +480,158 @@ def test_simplify_empty_text_returns_empty() -> None:
     assert result.terms_simplified == 0
 
 
+def test_simplify_stool_report_lists_only_labelled_findings() -> None:
+    """A stool report gets a compact source-linked summary, not rewritten OCR."""
+    result = simplify_module.simplify_text(
+        "Green Lab System\n"
+        "Patient ID Name\n"
+        "COMPLETE STOOL ANALYSIS\n"
+        "= Color : Brownish Brownish\n"
+        "= Odor : Fecal Fecal\n"
+        "= Pus cells : 5-6 per microscope field"
+    )
+
+    assert "Readable entries from the scan" in result.simplified_text
+    assert "Color - Brownish Brownish" in result.simplified_text
+    assert "White blood cells (pus cells) - 5-6 per microscope field" in result.simplified_text
+    assert "Patient ID" not in result.simplified_text
+    assert "not a diagnosis" in result.simplified_text
+
+
+def test_simplify_recovers_colonless_ocr_labels_with_local_model() -> None:
+    result = simplify_module.simplify_text(
+        "COMPLETE STOOL ANALYSIS\n"
+        "Pus Celis H 5-6 0-1 per microscope field\n"
+        "Fats H None found None found\n"
+        "Cysts H Entamoeba Histolytica Absent"
+    )
+
+    assert "White blood cells (pus cells) - H 5-6 0-1 per microscope field" in result.simplified_text
+    assert "Fats - H None found None found" in result.simplified_text
+    assert "Cysts - H Entamoeba Histolytica Absent" in result.simplified_text
+
+
+def test_local_label_model_is_offline_and_allowlisted() -> None:
+    from local_label_model import classify_label
+
+    assert classify_label("Pus Celis")[0] == "pus cells"
+    assert classify_label("Sodium result") is None
+
+
+def test_experimental_dengue_route_is_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.delenv("MEDAIX_DENGUE_SCREENING_ENABLED", raising=False)
+    payload = main_module.ExperimentalDengueScreeningInput(
+        age=35,
+        gender="Female",
+        hemoglobin_g_dl=13.5,
+        wbc_count=5000,
+        platelet_count=120000,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        main_module.experimental_dengue_screening(payload, User(supabase_uid="test-user"))
+
+    assert error.value.status_code == 404
+
+
+def test_experimental_dengue_route_returns_only_a_scoped_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MEDAIX_DENGUE_SCREENING_ENABLED", "true")
+    monkeypatch.setattr(main_module, "load_dengue_model", lambda: {"model_version": "test"})
+    monkeypatch.setattr(main_module, "predict_dengue_score", lambda payload, model: 0.42)
+    monkeypatch.setattr(main_module, "dengue_out_of_range", lambda payload, model: [])
+    payload = main_module.ExperimentalDengueScreeningInput(
+        age=35,
+        gender="Female",
+        hemoglobin_g_dl=13.5,
+        wbc_count=5000,
+        platelet_count=120000,
+    )
+
+    response = main_module.experimental_dengue_screening(
+        payload, User(supabase_uid="test-user")
+    )
+
+    assert response["status"] == "experimental_dataset_model"
+    assert response["positive_label_score"] == 0.42
+
+
+def test_experimental_anemia_route_is_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from main import ExperimentalAnemiaScreeningInput, experimental_anemia_screening
+
+    monkeypatch.setattr(main_module, "anemia_screening_enabled", lambda: False)
+    payload = ExperimentalAnemiaScreeningInput(
+        hemoglobin=12.0, mch=27.0, mchc=32.0, mcv=85.0
+    )
+    with pytest.raises(HTTPException) as error:
+        experimental_anemia_screening(payload, User(supabase_uid="test-user"))
+    assert error.value.status_code == 404
+
+
+def test_experimental_anemia_route_returns_a_scoped_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from main import ExperimentalAnemiaScreeningInput, experimental_anemia_screening
+
+    monkeypatch.setattr(main_module, "anemia_screening_enabled", lambda: True)
+    monkeypatch.setattr(
+        main_module, "load_anemia_model", lambda: {"model_version": "test"}
+    )
+    monkeypatch.setattr(main_module, "predict_anemia_score", lambda payload, model: 0.42)
+    monkeypatch.setattr(main_module, "anemia_out_of_range", lambda payload, model: [])
+    payload = ExperimentalAnemiaScreeningInput(
+        hemoglobin=12.0, mch=27.0, mchc=32.0, mcv=85.0
+    )
+    response = experimental_anemia_screening(
+        payload, User(supabase_uid="test-user")
+    )
+    assert response["status"] == "experimental_dataset_model"
+    assert response["positive_label_score"] == 0.42
+    assert "diagnosis" in response["notice"]
+    assert "diagnosis" not in response
+    assert "risk_tier" not in response
+    assert "treatment" in response["notice"]
+
+
+def test_simplify_unclear_report_does_not_present_raw_ocr_as_summary() -> None:
+    """Report-shaped text without identifiable rows gets a safe fallback."""
+    text = "COMPLETE BLOOD COUNT\nGreen Lab System\nSrc i 4ubil Slyisall"
+    result = simplify_module.simplify_text(text)
+
+    assert "couldn’t confidently identify" in result.simplified_text
+    assert "Green Lab System" not in result.simplified_text
+
+
+def test_simplify_numeric_report_preserves_value_and_printed_range() -> None:
+    result = simplify_module.simplify_text(
+        "COMPLETE BLOOD COUNT\nHaemoglobin 14.2 g/dL 12.0 - 16.0"
+    )
+
+    assert "Haemoglobin - 14.2 g/dL (reported range: 12.0–16.0)" in result.simplified_text
+    assert "not a diagnosis" in result.simplified_text
+
+
+def test_simplify_immunology_report_does_not_return_header_noise() -> None:
+    result = simplify_module.simplify_text(
+        "EIQ SSS LABORATORIES\n"
+        "Immunology Unit Ref. Range\n"
+        "Ferritin in Blood 53.0 nanograms per millilitre 10 - 120\n"
+        "Call Center 161"
+    )
+
+    assert "We identified these readable lab values" in result.simplified_text
+    assert "Ferritin In Blood - 53.0" in result.simplified_text
+    assert "EIQ SSS LABORATORIES" not in result.simplified_text
+    assert "Call Center" not in result.simplified_text
+
+
 def test_simplify_report_endpoint_simplifies_and_stores(client: TestClient) -> None:
     """POST /simplify-report stores and returns the simplification."""
     upload = client.post(
@@ -491,6 +686,78 @@ def test_simplify_report_endpoint_is_idempotent(client: TestClient) -> None:
     assert second.status_code == 200
     assert first.json()["simplified_text"] == second.json()["simplified_text"]
     assert second.json()["note"] == "Previously simplified."
+
+
+def test_simplify_report_refreshes_an_old_stored_rewrite() -> None:
+    """Opening a previously simplified report upgrades its old noisy output."""
+    session = SessionLocal()
+    try:
+        user = (
+            session.query(User)
+            .filter(User.supabase_uid == "test-user")
+            .one_or_none()
+        )
+        if user is None:
+            user = User(supabase_uid="test-user")
+            session.add(user)
+            session.flush()
+        report = Report(
+            user_id=user.id,
+            original_text=(
+                "Green Lab System\nPatient ID Name\nCOMPLETE STOOL ANALYSIS\n"
+                "= Color : Brownish Brownish\n= Blood : None found None found"
+            ),
+            simplified_text="Green Lab System Lab Data Manager Patient ID Name ...",
+        )
+        session.add(report)
+        session.commit()
+        result = main_module.simplify_report(
+            user,
+            session,
+            {"report_id": report.id},
+        )
+        assert result["note"] == "Previously simplified."
+        assert "Readable entries from the scan" in result["simplified_text"]
+        assert "Green Lab System" not in result["simplified_text"]
+    finally:
+        session.close()
+
+
+def test_report_list_recalculates_stale_ocr_parse_coverage() -> None:
+    """Old parse counts no longer keep a false phone-number result."""
+    session = SessionLocal()
+    try:
+        user = (
+            session.query(User)
+            .filter(User.supabase_uid == "test-user")
+            .one_or_none()
+        )
+        if user is None:
+            user = User(supabase_uid="test-user")
+            session.add(user)
+            session.flush()
+        report = Report(
+            user_id=user.id,
+            original_text=(
+                "Immunology Unit Ref. Range\n"
+                "Ferritin in Blood 53.0 ng/mL 10 - 120\n"
+                "Call Center - 161"
+            ),
+            values_read=2,
+            values_expected=5,
+            parse_note="We read 2 of 5 values",
+        )
+        session.add(report)
+        session.commit()
+
+        reports = main_module.list_reports(user, session)
+        listed = next(row for row in reports if row["id"] == report.id)
+
+        assert listed["values_read"] == 1
+        assert listed["values_expected"] == 1
+        assert listed["parse_note"] is None
+    finally:
+        session.close()
 
 
 def test_simplify_report_missing_id_returns_404(client: TestClient) -> None:
@@ -953,6 +1220,33 @@ def test_add_missing_user_columns_without_table_is_a_no_op(tmp_path) -> None:
     assert database.add_missing_user_columns(bind=empty) == []
 
 
+def test_report_idempotency_migration_adds_column_and_unique_index(tmp_path) -> None:
+    """Existing report tables gain the optional retry key and its index."""
+    legacy = create_engine(f"sqlite:///{tmp_path / 'legacy-reports.db'}")
+    with legacy.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, "
+                "supabase_uid VARCHAR NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE reports (id INTEGER PRIMARY KEY, "
+                "user_id INTEGER)"
+            )
+        )
+
+    added = database.add_missing_user_columns(bind=legacy)
+
+    assert "client_upload_id" in added
+    columns = {column["name"] for column in inspect(legacy).get_columns("reports")}
+    assert "client_upload_id" in columns
+    indexes = {index["name"] for index in inspect(legacy).get_indexes("reports")}
+    assert "uq_reports_user_client_upload_id" in indexes
+    assert database.add_missing_user_columns(bind=legacy) == []
+
+
 def test_add_missing_wellness_columns_upgrades_legacy_table(tmp_path) -> None:
     """An earlier WellnessLog table gains exercise and offline fields."""
     legacy = create_engine(f"sqlite:///{tmp_path / 'legacy-wellness.db'}")
@@ -1040,7 +1334,7 @@ def test_risk_trends_flags_a_rising_hba1c_streak(client: TestClient) -> None:
     assert body["insight"] == {
         "marker": "HbA1c",
         "title": "Your HbA1c has risen across 3 reports",
-        "body": "5.9 in March to 6.4 now. Worth raising with your doctor.",
+        "body": "5.9 on 2026-03-02 to 6.4 on 2026-09-02. Worth raising with your doctor.",
     }
     hba1c, haemoglobin = body["trends"]
     assert hba1c["marker"] == "HbA1c"
@@ -1049,7 +1343,10 @@ def test_risk_trends_flags_a_rising_hba1c_streak(client: TestClient) -> None:
     assert hba1c["alert"]["code"] == "rising_streak"
     assert hba1c["alert"]["level"] == "error"
     assert [point["report_id"] for point in hba1c["points"]] == ids
-    assert [point["label"] for point in hba1c["points"]] == ["Mar", "Jun", "Sep"]
+    assert all(
+        point["label"] == point["date"] and point["date_source"] == "upload"
+        for point in hba1c["points"]
+    )
     assert haemoglobin["marker"] == "Haemoglobin"
     assert haemoglobin["range"] == {
         "low": 12.0,
@@ -1110,6 +1407,7 @@ def test_list_reports_uses_panel_title_not_letterhead(client: TestClient) -> Non
     assert row["title"] == "Complete blood count"
     assert row["derived_title"] == "Complete blood count"
     assert row["report_date"]
+    assert row["report_date_source"] == "upload"
     assert "attention_count" in row
     assert row["title"] != "CITY LAB"
 
