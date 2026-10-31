@@ -116,6 +116,13 @@ jobs:
             echo "::error::Could not read version from pubspec.yaml"
             exit 1
           fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            EXPECTED_TAG="v${VERSION%%+*}"
+            if [ "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match app version $VERSION (expected $EXPECTED_TAG)."
+              exit 1
+            fi
+          fi
           # pubspec `name` is the Dart package (tahasync_medaix), not the brand,
           # so the artifact name is built from the product name only.
           # 0.1.0+1 -> v0.1.0-1; '+' is legal in filenames but reads badly.

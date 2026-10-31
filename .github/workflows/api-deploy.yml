@@ -74,3 +74,18 @@ jobs:
           fi
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
           echo "Deploy hook triggered."
+
+      - name: Verify deployed API health
+        if: >-
+          github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
+        run: |
+          if [ -z "$API_HEALTH_URL" ]; then
+            echo "::error::API_HEALTH_URL is not set, so the deployment cannot be verified."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --retry 18 --retry-delay 10 --retry-all-errors \
+            "$API_HEALTH_URL"

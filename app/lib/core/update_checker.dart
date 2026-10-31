@@ -51,7 +51,7 @@ class AppUpdateConfig {
 
 /// A `major.minor.patch` version plus the Android build number.
 ///
-/// Mirrors pubspec's `version: 0.1.2+3`: [build] is the `+3`, which Flutter
+/// Mirrors pubspec's `version: 0.1.3+4`: [build] is the `+4`, which Flutter
 /// writes as `versionCode` and `PackageInfo` reports as `buildNumber`.
 @immutable
 class ReleaseVersion implements Comparable<ReleaseVersion> {

@@ -61,6 +61,12 @@ by deterministic report-aware templates, with a reminder to check the source
 report. This is not a diagnostic model and does not establish clinical
 accuracy.
 
+Numeric rows support both common column orders: result → unit → reference
+range, and reference range → unit → result. In the second layout, the final
+numeric token after the printed range is treated as the result; if OCR does not
+capture a separate result, the row is omitted rather than displaying a range
+bound as a patient value.
+
 ### OCR validation (2026-10-31)
 
 The backend OCR and row parsers were run on 138 Train and 122 Test report
