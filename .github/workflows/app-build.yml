@@ -225,6 +225,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      # Every published version must have notes at this exact path. This keeps
+      # the update dialog useful and prevents an empty release description.
+      - name: Verify release notes exist
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: test -s "release-notes/${RELEASE_TAG}.md"
+
       - name: Download signed APK
         uses: actions/download-artifact@v4
         with:
@@ -236,6 +247,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: dist/${{ needs.build.outputs.slug }}.apk
+          body_path: release-notes/${{ github.ref_name }}.md
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

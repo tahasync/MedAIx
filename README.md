@@ -46,6 +46,7 @@ Zero paid infrastructure.
 ├── docs/
 │   ├── roadmap.md       32-week solo execution plan
 │   └── color-system.md  locked brand palette + semantic states
+├── release-notes/       versioned notes shown in the app update dialog
 └── .github/workflows/
     ├── api-deploy.yml   on api/**  — tests, then Render deploy hook
     ├── app-build.yml    on app/**  — builds + signs the APK
