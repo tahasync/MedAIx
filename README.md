@@ -10,7 +10,7 @@ sharing are not part of this release.
 > **Current milestone: Sprint 5 (Wk 9–10) — Integration Pass 1.** See
 > [`docs/roadmap.md`](docs/roadmap.md) for scope, checks, and limitations.
 >
-> **Android release:** `0.1.2+3` — GitHub release tag `v0.1.2`.
+> **Android release:** `0.1.3+4` — GitHub release tag `v0.1.3`.
 
 ## Live
 
@@ -48,8 +48,8 @@ Zero paid infrastructure.
 │   └── color-system.md  locked brand palette + semantic states
 ├── release-notes/       versioned notes shown in the app update dialog
 └── .github/workflows/
-    ├── api-deploy.yml   on api/**  — tests, then Render deploy hook
-    ├── app-build.yml    on app/**  — builds + signs the APK
+    ├── api-deploy.yml   on api/**  — tests, Render deploy hook, then health check
+    ├── app-build.yml    on app/** or v* tags — version-checks, signs, and releases the APK
     ├── app-build-sprint.yml — validates app/** and builds the Sprint 5 debug APK artifact
     └── keep-alive.yml   cron */10  — keeps the free instance awake
 ```

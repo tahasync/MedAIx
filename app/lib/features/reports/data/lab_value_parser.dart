@@ -19,6 +19,23 @@ final RegExp _linePattern = RegExp(
   r'|\(?\s*<\s*(?<lt>\d+(?:\.\d+)?)\s*\)?|\(?\s*>\s*(?<gt>\d+(?:\.\d+)?)\s*\)?)?',
 );
 
+// Several Pakistani CBC layouts print the reference interval and unit before
+// the rightmost RESULT column. Keep this separate from the usual
+// result → unit → range form so range bounds can never be mistaken for values.
+final RegExp _rangeFirstPattern = RegExp(
+  r'^\s*(?<name>[A-Za-z][A-Za-z ()/%\.\-]{1,40}?)\s+'
+  r'(?<low>\d+(?:\.\d+)?)\s*(?:-|–|to)\s*'
+  r'(?<high>\d+(?:\.\d+)?)(?<tail>.*)$',
+  caseSensitive: false,
+);
+final RegExp _trailingValuePattern = RegExp(r'(?<value>\d+(?:\.\d+)?)\s*$');
+final RegExp _rangeFirstUnitPattern = RegExp(
+  r'%|mg/d[lL]|g/d[lL]|mmol/[lL]|[mµu]?IU/m?[lL]|U/[lL]|fL|pg|'
+  r'ng/m[lL]|pg/m[lL]|mm/hr|x?10\^?\d+/?[a-zA-Zµ]*|/cumm|/[uµ][lL]|'
+  r'million/cumm|cells/cumm|mEq/[lL]|µmol/[lL]|umol/[lL]',
+  caseSensitive: false,
+);
+
 /// Plain-language one-liners for common markers. Anything else gets a
 /// neutral sentence so we never invent medicine.
 const Map<String, String> _explanations = <String, String>{
@@ -60,6 +77,44 @@ List<ReportValue> parseLabValues(String text) {
   for (final String rawLine in text.split(RegExp(r'\r?\n'))) {
     final String line = rawLine.trim();
     if (line.isEmpty) continue;
+
+    final RegExpMatch? rangeFirst = _rangeFirstPattern.firstMatch(line);
+    if (rangeFirst != null) {
+      final String tail = rangeFirst.namedGroup('tail') ?? '';
+      final RegExpMatch? trailingValue = _trailingValuePattern.firstMatch(tail);
+      if (trailingValue != null) {
+        final String beforeValue = tail
+            .substring(0, trailingValue.start)
+            .replaceAll(RegExp(r'\s+'), '');
+        final String? rawUnit = _rangeFirstUnitPattern
+            .firstMatch(beforeValue)
+            ?.group(0);
+        final String? unit = _cleanOcrUnit(rawUnit);
+        final double value = double.parse(trailingValue.namedGroup('value')!);
+        final double low = double.parse(rangeFirst.namedGroup('low')!);
+        final double high = double.parse(rangeFirst.namedGroup('high')!);
+        final String name = _cleanName(rangeFirst.namedGroup('name')!);
+        final (ValueStatus status, String statusText) = _judge(
+          value,
+          low: low,
+          high: high,
+        );
+        out.add(
+          ReportValue(
+            name: name,
+            value: unit == null ? _fmt(value) : '${_fmt(value)} $unit',
+            status: status,
+            statusText: statusText,
+            explanation: _explain(name, status, low: low, high: high),
+          ),
+        );
+        if (out.length >= _maxValues) break;
+        continue;
+      }
+      // A range-first row with no trailing result is not a patient value.
+      continue;
+    }
+
     final RegExpMatch? m = _linePattern.firstMatch(line);
     if (m == null) continue;
     final String? unit = m.namedGroup('unit');
@@ -96,6 +151,15 @@ List<ReportValue> parseLabValues(String text) {
 }
 
 double? _num(String? s) => s == null ? null : double.tryParse(s);
+
+String? _cleanOcrUnit(String? unit) {
+  if (unit == null) return null;
+  final String lower = unit.toLowerCase();
+  if (lower.endsWith('/dl1') || lower.endsWith('/ult')) {
+    return unit.substring(0, unit.length - 1);
+  }
+  return unit;
+}
 
 String _fmt(double v) =>
     v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();

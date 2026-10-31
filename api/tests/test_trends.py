@@ -64,6 +64,73 @@ def test_parser_reads_marker_value_unit_and_range() -> None:
     assert (parsed.raw_low, parsed.raw_high) == ("12.0", "16.0")
 
 
+def test_parser_reads_pakistani_cbc_range_unit_result_column_order() -> None:
+    text = """HAEMATOLOGY REPORT
+TEST REFERENCE RANGE UNIT RESULT
+BLOOD COMPLETE COUNT
+Haemoglobin 11.5 - 16.0 g/dl ↓ 10.5
+WBC (TLC) 4 - 11 x10^3 /uL ↑ 13.0
+Total RBC 4.0 - 5.5 x10^6 /uL 4.03
+HCT (PVC) 36 - 46 % ↓ 35.0
+MCV 76 - 96 fL 86.8
+MCH 27 - 32 % ↓ 26.8
+MCHC 30 - 35 % 30.9
+Platelets 150 - 450 x10^3 /uL 331
+DIFFERENTIAL LEUCOCYTES COUNT
+Neutrophils 40 - 75 % 65
+Lymphocytes 20 - 45 % 31
+Monocytes 02 - 10 % 02
+Eosinophils 01 - 06 % 02"""
+
+    parsed = parse_lab_values(text)
+
+    assert [row.marker for row in parsed] == [
+        "Haemoglobin",
+        "WBC (TLC)",
+        "Total RBC",
+        "HCT (PVC)",
+        "MCV",
+        "MCH",
+        "MCHC",
+        "Platelets",
+        "Neutrophils",
+        "Lymphocytes",
+        "Monocytes",
+        "Eosinophils",
+    ]
+    assert [row.value for row in parsed] == [
+        10.5,
+        13.0,
+        4.03,
+        35.0,
+        86.8,
+        26.8,
+        30.9,
+        331.0,
+        65.0,
+        31.0,
+        2.0,
+        2.0,
+    ]
+    assert [(row.low, row.high) for row in parsed[:3]] == [
+        (11.5, 16.0),
+        (4.0, 11.0),
+        (4.0, 5.5),
+    ]
+    assert parsed[1].unit == "x10^3/uL"
+
+    flagged = parse_lab_values(
+        "Haemoglobin 11.5 - 16.0 g/dl1 10.5\n"
+        "WBC 4 - 11 x10^3/uLt 13.0"
+    )
+    assert [row.unit for row in flagged] == ["g/dl", "x10^3/uL"]
+
+
+def test_parser_does_not_treat_range_first_bounds_as_a_result_when_result_is_missing() -> None:
+    assert parse_lab_values("Haemoglobin 11.5 - 16.0 g/dl") == []
+    assert parse_lab_values("WBC 4 - 11 x10^3/uL") == []
+
+
 @pytest.mark.parametrize(
     ("line", "low", "high"),
     [

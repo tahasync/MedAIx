@@ -25,6 +25,57 @@ void main() {
       expect(v.explanation, contains('kidneys'));
     });
 
+    test(
+      'reads Pakistani CBC result column after reference range and unit',
+      () {
+        const text = '''
+Haemoglobin 11.5 - 16.0 g/dl ↓ 10.5
+WBC (TLC) 4 - 11 x10^3 /uL ↑ 13.0
+Total RBC 4.0 - 5.5 x10^6 /uL 4.03
+HCT (PVC) 36 - 46 % ↓ 35.0
+MCV 76 - 96 fL 86.8
+MCH 27 - 32 % ↓ 26.8
+MCHC 30 - 35 % 30.9
+Platelets 150 - 450 x10^3 /uL 331
+Neutrophils 40 - 75 % 65
+Lymphocytes 20 - 45 % 31
+Monocytes 02 - 10 % 02
+Eosinophils 01 - 06 % 02
+''';
+
+        final values = parseLabValues(text);
+
+        expect(values, hasLength(12));
+        expect(values[0].name, 'Haemoglobin');
+        expect(values[0].value, '10.5 g/dl');
+        expect(values[0].statusText, 'Low');
+        expect(values[1].value, '13 x10^3/uL');
+        expect(values[1].statusText, 'High');
+        expect(values[2].value, '4.03 x10^6/uL');
+        expect(values[3].value, '35 %');
+        expect(values[4].value, '86.8 fL');
+        expect(values[5].value, '26.8 %');
+        expect(values[6].value, '30.9 %');
+        expect(values[7].value, '331 x10^3/uL');
+        expect(values[8].value, '65 %');
+        expect(values[9].value, '31 %');
+        expect(values[10].value, '2 %');
+        expect(values[11].value, '2 %');
+      },
+    );
+
+    test('does not treat a range-first row without its result as a value', () {
+      expect(parseLabValues('Haemoglobin 11.5 - 16.0 g/dl'), isEmpty);
+    });
+
+    test('strips OCR arrow artifacts attached to range-first units', () {
+      final values = parseLabValues(
+        'Haemoglobin 11.5 - 16.0 g/dl1 10.5\n'
+        'WBC 4 - 11 x10^3/uLt 13.0',
+      );
+      expect(values.map((value) => value.value), ['10.5 g/dl', '13 x10^3/uL']);
+    });
+
     test('just past the limit is Slightly high / Slightly low', () {
       expect(
         parseLabValues('Glucose 104 mg/dL (70 - 100)').single.statusText,

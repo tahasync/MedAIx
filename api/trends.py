@@ -239,6 +239,10 @@ def _unit_and_rest(rest: str) -> tuple[str | None, str]:
     if not match:
         return None, rest
     unit = match.group("unit").rstrip(".")
+    # Tesseract can read the report's up/down arrows as a trailing ``1`` or
+    # ``t`` and attach that artifact to the unit token (``g/dl1``, ``/uLt``).
+    if unit.lower().endswith("/dl1") or unit.lower().endswith("/ult"):
+        unit = unit[:-1]
     if "/" in unit or "%" in unit or unit.lower() in _BARE_UNITS:
         return unit, rest[match.end() :]
     return None, rest
@@ -265,19 +269,47 @@ def _parse_line(line: str) -> ParsedValue | None:
     cleaned = _TIME.sub(" ", _DATE.sub(" ", line.replace("|", " ").replace("\t", " ")))
     cleaned = " ".join(cleaned.split())
     matches = list(_NUMBER.finditer(cleaned))
-    match = matches[0] if matches else None
-    if not match:
+    first_match = matches[0] if matches else None
+    if not first_match:
         return None
 
-    # If OCR inserts a stray digit/flag before a result, prefer the last
-    # number before the first result unit (e.g. ``LDL 5 151 H mg/dL``).
-    first_unit = _RESULT_UNIT_TOKEN.search(cleaned, match.end())
-    if first_unit is not None:
-        before_unit = [candidate for candidate in matches if candidate.end() <= first_unit.start()]
-        if before_unit:
-            match = before_unit[-1]
+    # Some South Asian CBC forms print columns as test, reference range, unit,
+    # result. When the first numeric span is itself a range, the first number
+    # is a reference bound, not the result. Select the final numeric token
+    # after that range (the result column); if OCR did not capture one, omit
+    # the row instead of presenting a reference bound as a patient result.
+    leading_range = _RANGE_PAIR.match(cleaned[first_match.start() :])
+    if leading_range is not None:
+        range_end = first_match.start() + leading_range.end()
+        unit_tail = cleaned[range_end:]
+        unit_match = _UNIT.match(unit_tail)
+        value_start = range_end
+        if unit_match is not None:
+            candidate_unit = unit_match.group("unit")
+            if (
+                "/" in candidate_unit
+                or "%" in candidate_unit
+                or candidate_unit.lower() in _BARE_UNITS
+                or re.fullmatch(r"x?10[*^]\d+", candidate_unit, re.IGNORECASE)
+            ):
+                value_start += unit_match.end()
+        after_range = [candidate for candidate in matches if candidate.start() >= value_start]
+        if not after_range:
+            return None
+        match = after_range[-1]
+    else:
+        match = first_match
+        # If OCR inserts a stray digit/flag before a result, prefer the last
+        # number before the first result unit (e.g. ``LDL 5 151 H mg/dL``).
+        first_unit = _RESULT_UNIT_TOKEN.search(cleaned, match.end())
+        if first_unit is not None:
+            before_unit = [candidate for candidate in matches if candidate.end() <= first_unit.start()]
+            if before_unit:
+                match = before_unit[-1]
 
-    name = _EDGE_PUNCT.sub("", cleaned[: match.start()])
+    # The analyte name ends before either the result (ordinary layout) or the
+    # leading reference range (range-first layout).
+    name = _EDGE_PUNCT.sub("", cleaned[: first_match.start()])
     letters = re.sub(r"[^A-Za-z]", "", name)
     words = re.findall(r"[A-Za-z]+", name)
     if len(letters) < 2:
@@ -294,8 +326,14 @@ def _parse_line(line: str) -> ParsedValue | None:
 
     raw_value = "".join(match.group(0).split())
     value = float(match.group(1))
-    unit, rest = _unit_and_rest(cleaned[match.end() :])
-    low, high, raw_low, raw_high = _reference_range(rest)
+    if leading_range is not None:
+        raw_low, raw_high = leading_range.group(1), leading_range.group(2)
+        low, high = float(raw_low), float(raw_high)
+        unit_source = cleaned[first_match.start() + leading_range.end() : match.start()]
+        unit, _ = _unit_and_rest("".join(unit_source.split()))
+    else:
+        unit, rest = _unit_and_rest(cleaned[match.end() :])
+        low, high, raw_low, raw_high = _reference_range(rest)
     known_marker = any(pattern.search(name) for pattern, _ in _SYNONYMS) or bool(
         re.search(
             r"\b(?:wbc|rbc|mcv|mch|mchc|rdw|sodium|potassium|calcium|"
