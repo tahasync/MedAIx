@@ -1,4 +1,4 @@
-name: App Build Sprint 4
+name: App Build Sprint 5
 
 on:
   push:
@@ -52,8 +52,8 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses
 
-      - name: Build debug APK with Sprint 4 flag
-        run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=4
+      - name: Build debug APK with Sprint 5 flag
+        run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=5
 
       - name: Verify APK exists
         run: |
@@ -64,6 +64,6 @@ jobs:
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-sprint4.apk
+          name: app-debug-sprint5.apk
           path: app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7

@@ -60,11 +60,7 @@ class _TrendsOverview extends ConsumerWidget {
           StateSwitcher(
             child: overview.when(
               skipLoadingOnRefresh: true,
-              loading: () => const ScreenSkeleton(
-                key: ValueKey<String>('trends-loading'),
-                rows: 4,
-                firstHeight: 120,
-              ),
+              loading: () => const _TrendsLoading(),
               error: (error, _) => ErrorCard(
                 key: const ValueKey<String>('trends-error'),
                 title: 'Couldn’t load your trends',
@@ -230,7 +226,9 @@ class _MarkerTrendScreen extends ConsumerWidget {
     return AppScaffold(
       body: AppScreen(
         header: ScreenHeader(
-          title: '${series.valueOrNull?.marker ?? marker} trend',
+          title: series.valueOrNull?.marker == null
+              ? 'Trend details'
+              : '${series.valueOrNull!.marker} trend',
           subtitle: series.valueOrNull?.rangeLabel,
           showBack: true,
         ),
@@ -238,15 +236,7 @@ class _MarkerTrendScreen extends ConsumerWidget {
           StateSwitcher(
             child: series.when(
               skipLoadingOnRefresh: true,
-              loading: () => const Column(
-                key: ValueKey<String>('trend-loading'),
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SkeletonCard(height: 176),
-                  SizedBox(height: AppSpace.cardGap),
-                  SkeletonCard(height: 150),
-                ],
-              ),
+              loading: () => const _TrendLoading(),
               error: (error, _) => ErrorCard(
                 key: const ValueKey<String>('trend-error'),
                 title: 'Couldn’t load this trend',
@@ -362,45 +352,106 @@ class _TrendChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final List<TrendPoint> points = series.points;
-    final List<double> ys = <double>[
-      ...points.map((p) => p.value),
-      series.threshold,
-    ];
+    final List<double> ys = <double>[...points.map((p) => p.value)];
+    if (series.threshold case final double threshold) ys.add(threshold);
     double minY = ys.reduce((a, b) => a < b ? a : b);
     double maxY = ys.reduce((a, b) => a > b ? a : b);
     final double pad = (maxY - minY) == 0 ? 1 : (maxY - minY) * 0.25;
     minY -= pad;
     maxY += pad;
-    final double maxX = points.length == 1 ? 1 : (points.length - 1).toDouble();
+    final List<double> xs = points.map(_dayNumber).toList();
+    final bool sameDay = xs.first == xs.last;
+    final double minX = sameDay ? xs.first - 1 : xs.first;
+    final double maxX = sameDay ? xs.last + 1 : xs.last;
 
     return LineChart(
       duration: AppMotion.of(context, AppMotion.slow),
       curve: AppMotion.curve,
       LineChartData(
-        minX: 0,
+        minX: minX,
         maxX: maxX,
         minY: minY,
         maxY: maxY,
         clipData: const FlClipData.none(),
         gridData: const FlGridData(show: false),
         borderData: FlBorderData(show: false),
-        titlesData: const FlTitlesData(show: false),
-        lineTouchData: const LineTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          show: true,
+          leftTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 28,
+              // Date-valued x coordinates can span months or years. Asking
+              // fl_chart for its default interval creates many synthetic day
+              // ticks; show only the real endpoints and list every exact
+              // report date below the plot instead.
+              interval: maxX - minX,
+              getTitlesWidget: (value, meta) {
+                final double edgeTolerance = (maxX - minX) / 10;
+                final bool atStart = (value - minX).abs() <= edgeTolerance;
+                final bool atEnd = (value - maxX).abs() <= edgeTolerance;
+                if (!atStart && !atEnd) return const SizedBox.shrink();
+                if (sameDay && atEnd) return const SizedBox.shrink();
+                final DateTime date = atStart
+                    ? points.first.date
+                    : points.last.date;
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    _axisDate(date),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: c.muted),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (spots) => spots.map((spot) {
+              final int index = spot.spotIndex;
+              final TrendPoint point = points[index];
+              final String source = switch (point.dateSource) {
+                'report' => 'Report date',
+                'sample' => 'Sample date',
+                _ => 'Upload date',
+              };
+              return LineTooltipItem(
+                '$source\n${_fullDate(point.date)}\n'
+                        '${_fmt(point.value)} ${series.unit}'
+                    .trim(),
+                TextStyle(color: c.text, fontWeight: FontWeight.w600),
+              );
+            }).toList(),
+          ),
+        ),
         extraLinesData: ExtraLinesData(
           horizontalLines: <HorizontalLine>[
-            HorizontalLine(
-              y: series.threshold,
-              color: c.warn,
-              strokeWidth: 1,
-              dashArray: const <int>[4, 5],
-            ),
+            if (series.threshold case final double threshold)
+              HorizontalLine(
+                y: threshold,
+                color: c.warn,
+                strokeWidth: 1,
+                dashArray: const <int>[4, 5],
+              ),
           ],
         ),
         lineBarsData: <LineChartBarData>[
           LineChartBarData(
             spots: <FlSpot>[
               for (int i = 0; i < points.length; i++)
-                FlSpot(i.toDouble(), points[i].value),
+                FlSpot(xs[i], points[i].value),
             ],
             color: c.primary,
             barWidth: 3,
@@ -417,8 +468,7 @@ class _TrendChart extends StatelessWidget {
   }
 }
 
-/// "Mar 5.9 … Oct 6.4" under the chart, spaced between. Each label gets an
-/// equal share so nothing overflows at 320 dp or 200 % text.
+/// Exact dates and the date source for each plotted result.
 class _PointLabels extends StatelessWidget {
   const _PointLabels({required this.series});
 
@@ -431,25 +481,86 @@ class _PointLabels extends StatelessWidget {
       context,
     ).textTheme.bodySmall?.copyWith(color: c.muted);
     final List<TrendPoint> points = series.points;
-    return Row(
-      children: [
-        for (int i = 0; i < points.length; i++)
-          Expanded(
-            child: Text(
-              '${points[i].label} ${_fmt(points[i].value)}',
-              style: style,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: points.length == 1
-                  ? TextAlign.start
-                  : i == 0
-                  ? TextAlign.start
-                  : i == points.length - 1
-                  ? TextAlign.end
-                  : TextAlign.center,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (int i = 0; i < points.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpace.md),
+              child: Text(
+                '${switch (points[i].dateSource) {
+                  'report' => 'Report',
+                  'sample' => 'Sample',
+                  _ => 'Uploaded',
+                }} '
+                '${_fullDate(points[i].date)} · ${_fmt(points[i].value)}',
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.start,
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
+}
+
+double _dayNumber(TrendPoint point) =>
+    point.date.millisecondsSinceEpoch / Duration.millisecondsPerDay;
+
+String _fullDate(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
+
+String _axisDate(DateTime date) =>
+    '${_monthAbbreviation(date.month)} ${date.day}';
+
+String _monthAbbreviation(int month) => const <String>[
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+][month - 1];
+
+class _TrendsLoading extends StatelessWidget {
+  const _TrendsLoading();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey<String>('trends-loading'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: const [
+      SkeletonCard(height: 84),
+      SizedBox(height: AppSpace.cardGap),
+      SkeletonCard(height: 136),
+      SizedBox(height: AppSpace.cardGap),
+      SkeletonCard(height: 136),
+    ],
+  );
+}
+
+class _TrendLoading extends StatelessWidget {
+  const _TrendLoading();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey<String>('trend-loading'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: const [
+      SkeletonCard(height: 176),
+      SizedBox(height: AppSpace.cardGap),
+      SkeletonCard(height: 84),
+    ],
+  );
 }

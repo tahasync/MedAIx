@@ -10,9 +10,9 @@ import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'support/test_app.dart';
 
 void main() {
-  test('this build is Sprint 4: trends and wellness on, later epics off', () {
+  test('this build is Sprint 5: trends and wellness on, later epics off', () {
     const FeatureFlags f = FeatureFlags(kBuildSprint);
-    expect(kBuildSprint, 4);
+    expect(kBuildSprint, 5);
     expect(f.trends, isTrue);
     expect(f.wellness, isTrue);
     expect(f.meds, isFalse);

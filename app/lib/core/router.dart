@@ -18,6 +18,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../features/auth/providers/auth_providers.dart';
 import '../features/auth/ui/sign_in_screen.dart';
+import 'brand/brand.dart';
 import '../features/doctor/ui/doctor_screen.dart';
 import '../features/gallery/ui/gallery_screen.dart';
 import '../features/home/ui/home_screen.dart';
@@ -48,6 +49,7 @@ abstract final class AppRoutes {
   static const String home = '/';
   static const String doctor = '/doctor';
   static const String signIn = '/sign-in';
+  static const String accountLoading = '/account-loading';
   static const String onboarding = '/onboarding';
   static const String gallery = '/gallery';
 
@@ -88,6 +90,7 @@ final _rootKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 final routerProvider = Provider<GoRouter>((ref) {
   final _RouterRefresh refresh = _RouterRefresh();
   ref.listen(authControllerProvider, (_, _) => refresh.ping());
+  ref.listen(authBootstrapProvider, (_, _) => refresh.ping());
   ref.onDispose(refresh.dispose);
   final FeatureFlags features = ref.watch(featuresProvider);
 
@@ -101,14 +104,34 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     debugLogDiagnostics: false,
     redirect: (context, state) {
-      final bool signedIn = ref.read(authControllerProvider) != null;
+      final AsyncValue<void> bootstrap = ref.read(authBootstrapProvider);
       final String location = state.matchedLocation;
+      if (bootstrap.isLoading) {
+        if (location == AppRoutes.accountLoading) return null;
+        return Uri(
+          path: AppRoutes.accountLoading,
+          queryParameters: <String, String>{'next': state.uri.toString()},
+        ).toString();
+      }
+      final bool signedIn = ref.read(authControllerProvider) != null;
       final bool onSignIn = location == AppRoutes.signIn;
+      final bool onAccountLoading = location == AppRoutes.accountLoading;
+      if (onAccountLoading) {
+        if (!signedIn) return AppRoutes.signIn;
+        final String? next = state.uri.queryParameters['next'];
+        return next == null || next.isEmpty || next == AppRoutes.accountLoading
+            ? AppRoutes.home
+            : next;
+      }
       if (!signedIn && !onSignIn) return AppRoutes.signIn;
       if (signedIn && onSignIn) return AppRoutes.home;
       return null;
     },
     routes: <RouteBase>[
+      GoRoute(
+        path: AppRoutes.accountLoading,
+        builder: (context, state) => const AccountLoadingScreen(),
+      ),
       GoRoute(
         path: AppRoutes.signIn,
         builder: (context, state) => const SignInScreen(),
@@ -340,26 +363,7 @@ class _ShellLoading extends StatelessWidget {
   const _ShellLoading();
 
   @override
-  Widget build(BuildContext context) {
-    return AppScaffold(
-      body: AppScreen(
-        insetForNav: false,
-        showOfflineBanner: false,
-        children: const [
-          SizedBox(height: AppSpace.huge),
-          SkeletonBox(height: 32, width: 180, radius: AppRadius.skeleton),
-          SizedBox(height: AppSpace.md),
-          SkeletonBox(height: 16, width: 120),
-          SizedBox(height: AppSpace.headerGap),
-          SkeletonCard(height: 150),
-          SizedBox(height: AppSpace.cardGap),
-          SkeletonCard(height: 92),
-          SizedBox(height: AppSpace.cardGap),
-          SkeletonCard(height: 92),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const AccountLoadingScreen();
 }
 
 class _ShellError extends StatelessWidget {

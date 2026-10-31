@@ -41,7 +41,7 @@ app/lib/
   redirects to `/sign-in` without a session. `AppShell` shows onboarding until
   the profile is complete or the user skipped.
 - **Sprint gating.** Delivery follows `docs/roadmap.md` one epic per sprint.
-  `core/features.dart` reads `MEDAIX_SPRINT` (default 3 = the current sprint)
+  `core/features.dart` reads `MEDAIX_SPRINT` (default 5 = the current sprint)
   and `featuresProvider` hides every tab, Home tile, Settings row and route
   from a later sprint (wellness 4, meds 9, scan 10, doctor match 11, share 12,
   portal + reminders 13). New screens must check the flag the same way. Bump

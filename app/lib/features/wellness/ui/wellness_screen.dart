@@ -1,5 +1,4 @@
-/// Today (mockup `wellness`): water, steps and exercise cards with the
-/// habit score in the header.
+/// Personal daily wellness log for water, steps and recorded movement.
 library;
 
 import 'package:flutter/material.dart';
@@ -33,15 +32,22 @@ class WellnessScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _logWalk(BuildContext context, WidgetRef ref) async {
+  Future<void> _logActivity(BuildContext context, WidgetRef ref) async {
+    final _MovementEntry? entry = await showDialog<_MovementEntry>(
+      context: context,
+      builder: (_) => const _LogMovementDialog(),
+    );
+    if (entry == null || !context.mounted) return;
     final bool? ok = await ref
         .read(wellnessProvider.notifier)
-        .logExercise('Walk', minutes: 10);
+        .logExercise(entry.activity, minutes: entry.minutes);
     if (ok == null || !context.mounted) return;
     ref.invalidate(habitTodayProvider);
     showToast(
       context,
-      ok ? 'Walk logged' : 'Couldn’t log your walk. Today’s log is unchanged.',
+      ok
+          ? '${entry.activity} logged'
+          : 'Couldn’t log the activity. Today’s log is unchanged.',
     );
   }
 
@@ -72,8 +78,8 @@ class WellnessScreen extends ConsumerWidget {
     return AppScaffold(
       body: AppScreen(
         header: ScreenHeader(
-          title: 'Today',
-          subtitle: value == null ? null : 'Habit score ${value.habitScore}',
+          title: 'Wellness',
+          subtitle: value == null ? null : _dayLabel(value.date),
         ),
         onRefresh: () => ref.read(wellnessProvider.notifier).refresh(),
         children: day.when(
@@ -105,12 +111,14 @@ class WellnessScreen extends ConsumerWidget {
                           'saved on this device and will sync when you’re back online.'
                     : 'You’re offline. Your saved log is shown; new entries will sync when you’re back online.',
               ),
+            _TodayProgressCard(day: d),
+            const SectionTitle('Hydration'),
             _HabitCard(
               icon: LucideIcons.droplet,
               title: 'Water',
               subtitle: d.waterGoalMl == null
-                  ? '${d.waterMl} ml logged · ${d.waterGoalNote}'
-                  : '${d.waterMl} / ${d.waterGoalMl} ml · ${d.waterGoalNote}',
+                  ? '${formatThousands(d.waterMl)} ml logged · ${d.waterGoalNote}'
+                  : '${formatThousands(d.waterMl)} / ${formatThousands(d.waterGoalMl!)} ml · ${d.waterGoalNote}',
               progress: d.waterGoalMl == null ? null : d.waterProgress,
               progressLabel: 'Water progress',
               trailing: AppIconButton(
@@ -120,13 +128,13 @@ class WellnessScreen extends ConsumerWidget {
                 onPressed: () => _addWater(context, ref),
               ),
             ),
-            const SizedBox(height: AppSpace.cardGap),
+            const SectionTitle('Movement'),
             _HabitCard(
               icon: LucideIcons.activity,
               title: 'Steps',
-              subtitle:
-                  '${formatThousands(d.steps)} / ${formatThousands(d.stepGoal)}'
-                  ' · ${d.stepGoalNote}',
+              subtitle: d.stepGoal > 0
+                  ? '${formatThousands(d.steps)} / ${formatThousands(d.stepGoal)} steps · ${d.stepGoalNote}'
+                  : '${formatThousands(d.steps)} steps logged · No daily goal set.',
               trailing: AppIconButton(
                 icon: LucideIcons.plus,
                 label: 'Log steps',
@@ -138,21 +146,16 @@ class WellnessScreen extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpace.cardGap),
             _HabitCard(
-              icon: LucideIcons.heart,
-              title: 'Exercise',
-              subtitle: d.exerciseLabel ?? 'Not logged yet',
-              trailing: d.exerciseLabel == null
-                  ? GhostButton(
-                      label: 'Log walk',
-                      compact: true,
-                      onPressed: () => _logWalk(context, ref),
-                    )
-                  : StatusLabel(
-                      status: ValueStatus.ok,
-                      text: d.exerciseMinutes > 0
-                          ? 'Logged · ${d.exerciseMinutes} min'
-                          : 'Logged',
-                    ),
+              icon: LucideIcons.heartPulse,
+              title: 'Movement',
+              subtitle: d.exerciseMinutes > 0
+                  ? '${d.exerciseMinutes} min logged today'
+                  : 'No activity logged today',
+              trailing: GhostButton(
+                label: 'Log activity',
+                compact: true,
+                onPressed: () => _logActivity(context, ref),
+              ),
             ),
             const SizedBox(height: AppSpace.cardGap),
             AppCard(
@@ -161,7 +164,7 @@ class WellnessScreen extends ConsumerWidget {
                 children: [
                   const CardTag(
                     icon: LucideIcons.lightbulb,
-                    label: 'Today’s tip',
+                    label: 'A note for today',
                   ),
                   Text(
                     d.dailyTip,
@@ -175,6 +178,162 @@ class WellnessScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _TodayProgressCard extends StatelessWidget {
+  const _TodayProgressCard({required this.day});
+
+  final WellnessDay day;
+
+  @override
+  Widget build(BuildContext context) {
+    final int score = day.habitScore;
+    final TextTheme text = Theme.of(context).textTheme;
+    final c = context.colors;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Today’s progress', style: text.titleLarge),
+          const SizedBox(height: AppSpace.xs),
+          Text('Habit score $score%', style: text.headlineSmall),
+          const SizedBox(height: AppSpace.md),
+          ProgressBar(
+            value: score / 100,
+            semanticLabel: 'Habit score progress: $score percent',
+          ),
+          const SizedBox(height: AppSpace.lg),
+          Text(day.nextStep, style: text.bodyMedium),
+          const SizedBox(height: AppSpace.xs),
+          Text(
+            'Based on habits you log here; it is not a health assessment.',
+            style: text.bodySmall?.copyWith(color: c.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _dayLabel(String? value) {
+  if (value == null) return 'Your daily log';
+  final DateTime? date = DateTime.tryParse(value);
+  if (date == null) return 'Your daily log';
+  const List<String> weekdays = <String>[
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+  const List<String> months = <String>[
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+  return '${weekdays[date.weekday - 1]}, ${months[date.month - 1]} ${date.day}';
+}
+
+class _MovementEntry {
+  const _MovementEntry({required this.activity, required this.minutes});
+
+  final String activity;
+  final int minutes;
+}
+
+class _LogMovementDialog extends StatefulWidget {
+  const _LogMovementDialog();
+
+  @override
+  State<_LogMovementDialog> createState() => _LogMovementDialogState();
+}
+
+class _LogMovementDialogState extends State<_LogMovementDialog> {
+  final TextEditingController _activity = TextEditingController(text: 'Walk');
+  final TextEditingController _minutes = TextEditingController(text: '10');
+  String? _activityError;
+  String? _minutesError;
+
+  @override
+  void dispose() {
+    _activity.dispose();
+    _minutes.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Log movement'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: _activity,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            labelText: 'Activity',
+            hintText: 'Walk, stretching or cycling',
+            errorText: _activityError,
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _minutes,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: 'Minutes',
+            hintText: 'For example, 15',
+            errorText: _minutesError,
+          ),
+        ),
+      ],
+    ),
+    actions: [
+      GhostButton(
+        label: 'Cancel',
+        compact: true,
+        onPressed: () => Navigator.pop(context),
+      ),
+      PrimaryButton(
+        label: 'Save activity',
+        compact: true,
+        onPressed: () {
+          final String activity = _activity.text.trim();
+          final int? minutes = int.tryParse(_minutes.text.trim());
+          if (activity.isEmpty || activity.length > 40) {
+            setState(
+              () => _activityError =
+                  'Enter an activity name up to 40 characters.',
+            );
+            return;
+          }
+          setState(() => _activityError = null);
+          if (minutes == null || minutes < 1 || minutes > 480) {
+            setState(
+              () => _minutesError = 'Enter a duration from 1 to 480 minutes.',
+            );
+            return;
+          }
+          setState(() => _minutesError = null);
+          Navigator.pop(
+            context,
+            _MovementEntry(activity: activity, minutes: minutes),
+          );
+        },
+      ),
+    ],
+  );
 }
 
 class _LogStepsDialog extends StatefulWidget {

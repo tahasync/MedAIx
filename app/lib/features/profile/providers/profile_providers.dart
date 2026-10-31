@@ -7,6 +7,8 @@ import '../../../data/repositories.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../home/providers/home_providers.dart';
 import '../../reports/data/reports_repository.dart';
+import '../../reports/providers/reports_providers.dart';
+import '../../reports/providers/trends_providers.dart';
 import '../../wellness/providers/wellness_providers.dart';
 import '../data/profile_repository.dart';
 
@@ -31,6 +33,7 @@ class ProfileEditor extends Notifier<AsyncValue<void>> {
           .read(profileRepositoryProvider)
           .save(draft);
       ref.invalidate(profileProvider);
+      _invalidateHealthViews();
       state = const AsyncData(null);
       return saved;
     } on RepositoryException catch (error, stack) {
@@ -43,16 +46,34 @@ class ProfileEditor extends Notifier<AsyncValue<void>> {
     state = const AsyncLoading();
     try {
       await ref.read(profileRepositoryProvider).delete();
+      await ref.read(reportsRepositoryProvider).clearHealthData();
       await ref.read(wellnessRepositoryProvider).clearLocal();
       ref.invalidate(profileProvider);
-      ref.invalidate(wellnessProvider);
-      ref.invalidate(habitTodayProvider);
+      _invalidateHealthViews(clearReportViews: true);
       state = const AsyncData(null);
       return true;
     } on RepositoryException catch (error, stack) {
       state = AsyncError(error, stack);
       return false;
     }
+  }
+
+  /// Profile answers affect condition-aware trends and wellness goals. Clear
+  /// those views together with report data after saves and health-data deletion
+  /// so a previous account state is never left on screen from provider caches.
+  void _invalidateHealthViews({bool clearReportViews = false}) {
+    if (clearReportViews) {
+      ref.invalidate(reportsListProvider);
+      ref.invalidate(latestReportProvider);
+      ref.invalidate(reportDetailProvider);
+    }
+    ref.invalidate(insightsRepositoryProvider);
+    ref.invalidate(homeInsightProvider);
+    ref.invalidate(trendOverviewProvider);
+    ref.invalidate(trendSeriesProvider);
+    ref.invalidate(wellnessRepositoryProvider);
+    ref.invalidate(wellnessProvider);
+    ref.invalidate(habitTodayProvider);
   }
 }
 

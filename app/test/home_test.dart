@@ -31,7 +31,7 @@ void main() {
 
     expect(find.byType(AiInsightCard), findsOneWidget);
     expect(find.text('AI insight'), findsOneWidget);
-    expect(find.text('Your HbA1c has risen across 3 reports'), findsOneWidget);
+    expect(find.text('Sample HbA1c trend'), findsOneWidget);
     expect(find.text('See the trend'), findsOneWidget);
   });
 
@@ -70,7 +70,7 @@ void main() {
     }
   });
 
-  testWidgets('habit card has a labelled ring and the next step', (
+  testWidgets('habit card shows its score, progress and next step', (
     tester,
   ) async {
     final handle = tester.ensureSemantics();
@@ -79,14 +79,17 @@ void main() {
     await tester.pumpAndSettle();
 
     // Default fake day: 750/2400 ml water, 4120/6000 steps, no exercise.
-    expect(find.byType(ScoreRing), findsOneWidget);
+    expect(find.byType(ScoreRing), findsNothing);
     expect(find.text('Habit score 40'), findsOneWidget);
-    // The ring's label is merged into the card's node.
+    expect(find.byType(ProgressBar), findsOneWidget);
     expect(
-      tester.getSemantics(find.byType(ScoreRing)).label,
-      contains('Habit score 40 of 100'),
+      tester.getSemantics(find.byType(ProgressBar)).label,
+      contains('Habit score progress: 40 of 100'),
     );
-    expect(find.text('Log water to reach 48 today'), findsOneWidget);
+    expect(
+      find.text('Next: log water toward your daily goal.'),
+      findsOneWidget,
+    );
     expect(find.byTooltip('Open wellness'), findsOneWidget);
     handle.dispose();
   });

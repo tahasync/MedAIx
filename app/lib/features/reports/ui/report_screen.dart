@@ -1,7 +1,6 @@
-/// One report (mockup `report`): "In plain words" summary, a card per
-/// value, and the trend button. Real OCR text that did not parse into
-/// values shows the full plain-language rewrite instead, and the original
-/// text is always one toggle away.
+/// One report (mockup `report`): a report-aware plain-language summary,
+/// a card per parsed value, and the trend button. The original OCR text is
+/// always one toggle away for checking uncertain extraction.
 library;
 
 import 'package:flutter/material.dart';
@@ -52,10 +51,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           StateSwitcher(
             child: report.when(
               skipLoadingOnRefresh: true,
-              loading: () => const ScreenSkeleton(
-                key: ValueKey<String>('report-loading'),
-                rows: 3,
-              ),
+              loading: () =>
+                  const _ReportLoading(key: ValueKey<String>('report-loading')),
               error: (error, _) => ErrorCard(
                 key: const ValueKey<String>('report-error'),
                 title: 'Couldn’t open this report',
@@ -82,6 +79,51 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       ),
     );
   }
+}
+
+class _ReportLoading extends StatelessWidget {
+  const _ReportLoading({super.key});
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            SkeletonBox(height: 16, width: 112),
+            SizedBox(height: AppSpace.md),
+            SkeletonBox(height: 22, width: 240),
+            SizedBox(height: AppSpace.sm),
+            SkeletonBox(height: 16, width: 180),
+          ],
+        ),
+      ),
+      for (int i = 0; i < 3; i++) ...[
+        const SizedBox(height: AppSpace.cardGap),
+        const AppCard(
+          child: Row(
+            children: [
+              SkeletonBox(height: 44, width: 44),
+              SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(height: 16, width: 120),
+                    SizedBox(height: AppSpace.sm),
+                    SkeletonBox(height: 20, width: 76),
+                  ],
+                ),
+              ),
+              SkeletonBox(height: 24, width: 82),
+            ],
+          ),
+        ),
+      ],
+    ],
+  );
 }
 
 class _ReportBody extends StatelessWidget {
@@ -219,7 +261,9 @@ class _ReportBody extends StatelessWidget {
         PrimaryButton(
           label: 'View trend over time',
           onPressed: () => context.go(
-            '${AppRoutes.trends}?marker=${Uri.encodeQueryComponent(_trendMarker)}',
+            report.values.isEmpty
+                ? AppRoutes.trends
+                : '${AppRoutes.trends}?marker=${Uri.encodeQueryComponent(_trendMarker)}',
           ),
         ),
       ],

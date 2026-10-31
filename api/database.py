@@ -132,10 +132,16 @@ def add_missing_user_columns(bind=None) -> list[str]:
     ``bind`` defaults to the application engine; tests pass a throwaway one.
     Returns the names of the columns that were added.
     """
+    from sqlalchemy import inspect
+
     from models import Report, User
 
+    target = bind if bind is not None else engine
     added = _add_missing_columns(User, bind)
     added.extend(_add_missing_columns(Report, bind))
+    if inspect(target).has_table(Report.__tablename__):
+        for index in Report.__table__.indexes:
+            index.create(target, checkfirst=True)
     return added
 
 

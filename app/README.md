@@ -1,6 +1,6 @@
 # MedAIx — Flutter client
 
-The Flutter client for MedAIx.
+The Flutter client for MedAIx. The current integration baseline is Sprint 5.
 
 - **Sprint 1:** camera capture with an explained runtime permission, report
   file selection, language selection (English, Urdu, and Roman Urdu), OCR
@@ -10,16 +10,12 @@ The Flutter client for MedAIx.
   screen (view, edit, delete), and the simplified-report screen that lists
   scanned reports and rewrites a chosen one in plain language with a
   side-by-side original view.
-- **UI rebuild:** a flat, token-driven design system with a five-tab floating
-  nav (Home, Reports, Meds, Wellness, More), per-value report cards and
-  trends, a medicine interaction check and packet scanner, wellness habits,
-  time-limited sharing with a doctor (QR + portal preview), reminders, and
-  light / dark / system theme — all with empty, loading, error, offline and
-  permission states. Medicines, wellness, share, doctor match and insights run
-  on in-memory fakes until their backend lands, and **screens are gated by
-  sprint** (`MEDAIX_SPRINT`, default 3): a build only shows the epics the
-  roadmap has delivered — currently Home, Reports (upload, report, trends)
-  and More (profile, appearance, account, help).
+- **Sprint 3–5:** numeric report values and trends, API-backed wellness logs,
+  retry-safe report upload, profile-aware refresh, and data-deletion cleanup
+  across server and local caches.
+- **UI foundation:** a flat, token-driven five-tab design system with Home,
+  Reports, Wellness and More enabled in the Sprint 5 build. Medicines, sharing,
+  doctor matching and reminders remain gated until their roadmap sprints.
 
 See the [root README](../README.md) for the full stack and deployment notes,
 [`docs/color-system.md`](../docs/color-system.md) for the palette, and
@@ -44,6 +40,7 @@ Point the client at a local API and the Supabase project:
 ```bash
 flutter run \
   --dart-define=API_BASE_URL=http://localhost:8000 \
+  --dart-define=SUPABASE_URL=<project URL> \
   --dart-define=SUPABASE_ANON_KEY=<publishable key>
 ```
 
@@ -55,6 +52,7 @@ Or at production:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=https://medaix.onrender.com \
+  --dart-define=SUPABASE_URL=<project URL> \
   --dart-define=SUPABASE_ANON_KEY=<publishable key>
 ```
 
@@ -69,7 +67,7 @@ pointing at localhost.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `API_BASE_URL` | `http://localhost:8000` | API root |
-| `MEDAIX_SPRINT` | `3` | Sprint this build represents; tabs, tiles, settings rows and routes from later sprints are hidden (`13` shows everything for a demo) |
+| `MEDAIX_SPRINT` | `5` | Sprint this build represents; tabs, tiles, settings rows and routes from later sprints are hidden (`13` shows everything for a demo) |
 | `MEDAIX_FAKE_DATA` | `false` | Use in-memory fakes for reports and profile too (no backend needed) |
 | `SUPABASE_URL` | the hosted project | Supabase project URL |
 | `SUPABASE_ANON_KEY` | *(empty — sign-in disabled)* | Supabase publishable key |

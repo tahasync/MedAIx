@@ -220,13 +220,19 @@ String guessReportTitle(String text) {
 /// First one or two sentences of a plain-language text, for the summary
 /// card. The full text stays available below it.
 String leadSentences(String text, {int count = 2}) {
-  final String flat = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (flat.isEmpty) return flat;
-  final Iterable<RegExpMatch> ends = RegExp(r'[.!?](\s|$)').allMatches(flat);
+  final String formatted = text
+      .split(RegExp(r'\r?\n'))
+      .map((String line) => line.replaceAll(RegExp(r'[ \t]+'), ' ').trim())
+      .join('\n')
+      .trim();
+  if (formatted.isEmpty) return formatted;
+  final Iterable<RegExpMatch> ends = RegExp(
+    r'[.!?](\s|$)',
+  ).allMatches(formatted);
   int taken = 0;
   for (final RegExpMatch m in ends) {
     taken++;
-    if (taken == count) return flat.substring(0, m.end).trim();
+    if (taken == count) return formatted.substring(0, m.end).trim();
   }
-  return flat;
+  return formatted;
 }

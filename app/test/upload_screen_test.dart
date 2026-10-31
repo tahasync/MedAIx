@@ -115,13 +115,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(find.text('Reading your report'), findsOneWidget);
-      expect(find.text('Step 1 of 3 · uploading'), findsOneWidget);
-      expect(find.byType(ProgressBar), findsOneWidget);
+      expect(
+        find.text('Sending the report and reading its text'),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
       expect(find.byType(SkeletonBox), findsWidgets);
 
-      // Second phase moves the bar and the subtitle.
+      // The fake repository moves to checking values without inventing a %.
       await tester.pump(const Duration(milliseconds: 250));
-      expect(find.text('Step 2 of 3 · extracting values'), findsOneWidget);
+      expect(find.text('Checking the values we could read'), findsOneWidget);
 
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
@@ -154,7 +157,8 @@ void main() {
       );
       expect(
         find.textContaining(
-          'Nothing was saved, and your existing reports are safe.',
+          'Retrying this upload uses the same request id, so it will not '
+          'create a duplicate report. Your other reports are safe.',
         ),
         findsOneWidget,
       );

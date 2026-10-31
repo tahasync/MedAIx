@@ -141,11 +141,20 @@ void main() {
   });
 
   group('leadSentences', () {
-    test('takes the first two sentences and flattens whitespace', () {
+    test('takes the first two sentences and preserves report list layout', () {
       expect(
         leadSentences('One is here.\nTwo   is here! Three is here.'),
-        'One is here. Two is here!',
+        'One is here.\nTwo is here!',
       );
+    });
+
+    test('keeps structured lab summary rows on separate lines', () {
+      const String summary =
+          'Readable values from the scan:\n'
+          '- Ferritin - 53.0 ng/mL\n'
+          '\n'
+          'Check each entry against the original; this is not a diagnosis.';
+      expect(leadSentences(summary), summary);
     });
 
     test('returns everything when there are fewer sentences', () {

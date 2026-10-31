@@ -1,16 +1,14 @@
 # MedAIx
 
-AI-powered clinical decision support. Upload a lab report → OCR + NLP simplify
-it into plain language → track it against a patient profile → flag risk trends →
-check drug interactions → scan medicine packaging → recommend a specialist →
-share a curated view with a doctor via time-limited QR.
+MedAIx helps patients review photographed lab reports. The current Sprint 5
+release connects report upload and OCR, deterministic plain-language
+simplification, Supabase sign-in and profile storage, numeric risk trends, and
+condition-aware wellness logging in one account-scoped flow. Later roadmap
+features such as medication safety, medicine scanning, doctor matching, and QR
+sharing are not part of this release.
 
-> **Status: Sprint 2 — NLP simplification + profile storage. COMPLETE.**
-> Sign in (Supabase Auth: Google or email), answer a three-step onboarding
-> questionnaire, scan a report in English, Urdu script, or Roman Urdu, then
-> rewrite its medical terms in plain language and keep a per-user report
-> history. Risk/trend analysis (Sprint 3) is next. See
-> [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
+> **Current milestone: Sprint 5 (Wk 9–10) — Integration Pass 1.** See
+> [`docs/roadmap.md`](docs/roadmap.md) for scope, checks, and limitations.
 
 ## Live
 
@@ -49,7 +47,7 @@ Zero paid infrastructure.
 └── .github/workflows/
     ├── api-deploy.yml   on api/**  — tests, then Render deploy hook
     ├── app-build.yml    on app/**  — builds + signs the APK
-    ├── app-build-sprint.yml — validates app/** and builds the Sprint 3 debug APK artifact
+    ├── app-build-sprint.yml — validates app/** and builds the Sprint 5 debug APK artifact
     └── keep-alive.yml   cron */10  — keeps the free instance awake
 ```
 
@@ -81,10 +79,12 @@ token>`. See [`api/.env.example`](api/.env.example) for `SUPABASE_URL`.
 
 | Route | Sprint | Purpose |
 |---|---|---|
-| `POST /upload-report` | 1 | OCR a report image/PDF, store the raw text |
-| `POST /simplify-report` | 2 | Rewrite medical terms in plain language (idempotent) |
+| `POST /upload-report` | 1 | OCR a report image/PDF and store extracted text; retry-safe with `upload_id` |
+| `POST /simplify-report` | 2 | Build a deterministic plain-language report summary |
 | `GET /reports` | 2 | The signed-in user's reports, newest first |
 | `GET/PUT/DELETE /profile` | 2 | Onboarding answers and profile CRUD |
+| `GET /risk-trends` | 3 | Numeric lab trends and rule-based alerts |
+| `GET/POST /wellness/log` | 4 | Account-scoped daily wellness totals and entries |
 
 On Linux, install the OCR binaries and language data with `apt-get`; see
 [`api/README.md`](api/README.md#ocr-language-data) for local and Render setup.
@@ -113,13 +113,17 @@ run talks to the same Neon database as production.
 
 ## Deployment
 
-Pushing to `main` deploys to Render via GitHub Actions.
+Pushing API changes to `main` runs the API test suite and triggers the Render
+deploy hook. Pushing an app change or a `v*` tag runs the app release workflow;
+the Sprint 5 workflow builds a debug APK artifact. Creating a local tag does
+not publish it or start a GitHub Actions run.
 
 | Secret | Purpose |
 |---|---|
 | `RENDER_DEPLOY_HOOK_URL` | Render deploy hook, called by `api-deploy.yml` |
 | `ANDROID_SIGNING_KEY` + keystore password/alias/key | APK signing |
-| `API_BASE_URL`, `API_HEALTH_URL` | Repository variables, not secrets |
+| `SUPABASE_ANON_KEY` | Supabase public client key supplied at build time |
+| `API_BASE_URL`, `API_HEALTH_URL`, `SUPABASE_URL` | Repository variables, not secrets |
 
 `NEON_DATABASE_URL` is configured in the **Render service environment** rather
 than as a GitHub secret, since that is the only place it is consumed.
@@ -137,11 +141,8 @@ GitHub delays scheduled runs under load — so pair it with an external monitor:
 4. URL: `https://medaix.onrender.com/health`
 5. Monitoring interval: **5 minutes** (the shortest the free plan offers)
 
-Leave the default alert contacts. Once added, Render stays "Live" rather than
-cycling to "Suspended".
-
-✅ **Configured** — an HTTP(s) monitor on `https://medaix.onrender.com/health`
-at 5-minute intervals, alongside the GitHub cron. Both currently report up.
+Choose alert contacts that you monitor. The GitHub cron is best-effort and may
+be delayed under load.
 
 > Ping a real app route, never `/robots.txt` — Render answers that path itself
 > even while spun down, so it never reaches the app and never resets the idle

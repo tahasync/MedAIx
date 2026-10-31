@@ -296,8 +296,8 @@ class FakeInsightsRepository implements InsightsRepository {
   FakeInsightsRepository({
     this.latency = const Duration(milliseconds: 200),
     this.insight = const Insight(
-      title: 'Your HbA1c has risen across 3 reports',
-      body: '5.9 in March to 6.4 now. Worth raising with your doctor.',
+      title: 'Sample HbA1c trend',
+      body: 'Demo values: 5.9 to 6.4 across four sample readings.',
       marker: 'HbA1c',
     ),
     this.reportsCount = 4,
@@ -380,28 +380,56 @@ class FakeInsightsRepository implements InsightsRepository {
   /// Obviously-sample histories: HbA1c (alert), fasting glucose, LDL.
   static List<TrendSeries> sampleTrends() => <TrendSeries>[
     FakeReportsRepository.sampleTrend(),
-    const TrendSeries(
+    TrendSeries(
       marker: 'Fasting glucose',
       unit: 'mg/dL',
       points: <TrendPoint>[
-        TrendPoint(label: 'Mar', value: 92),
-        TrendPoint(label: 'Jun', value: 95),
-        TrendPoint(label: 'Aug', value: 94),
-        TrendPoint(label: 'Oct', value: 96),
+        TrendPoint(
+          date: DateTime.utc(2026, 3, 1),
+          dateSource: 'sample',
+          value: 92,
+        ),
+        TrendPoint(
+          date: DateTime.utc(2026, 6, 1),
+          dateSource: 'sample',
+          value: 95,
+        ),
+        TrendPoint(
+          date: DateTime.utc(2026, 8, 1),
+          dateSource: 'sample',
+          value: 94,
+        ),
+        TrendPoint(
+          date: DateTime.utc(2026, 10, 1),
+          dateSource: 'sample',
+          value: 96,
+        ),
       ],
       threshold: 99,
-      rangeLabel: '4 reports · Mar to Oct',
+      rangeLabel: 'Sample data · 4 results',
     ),
-    const TrendSeries(
+    TrendSeries(
       marker: 'LDL',
       unit: 'mg/dL',
       points: <TrendPoint>[
-        TrendPoint(label: 'Mar', value: 118),
-        TrendPoint(label: 'Aug', value: 104),
-        TrendPoint(label: 'Oct', value: 97),
+        TrendPoint(
+          date: DateTime.utc(2026, 3, 1),
+          dateSource: 'sample',
+          value: 118,
+        ),
+        TrendPoint(
+          date: DateTime.utc(2026, 8, 1),
+          dateSource: 'sample',
+          value: 104,
+        ),
+        TrendPoint(
+          date: DateTime.utc(2026, 10, 1),
+          dateSource: 'sample',
+          value: 97,
+        ),
       ],
       threshold: 100,
-      rangeLabel: '3 reports · Mar to Oct',
+      rangeLabel: 'Sample data · 3 results',
     ),
   ];
 }
@@ -527,6 +555,9 @@ class FailingReportsRepository implements ReportsRepository {
   final String message;
 
   @override
+  Future<void> clearHealthData() async {}
+
+  @override
   Future<List<LabReport>> listReports() async =>
       throw RepositoryException(message);
 
@@ -538,6 +569,7 @@ class FailingReportsRepository implements ReportsRepository {
   Future<LabReport> uploadReport(
     String filePath, {
     ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
     void Function(UploadPhase phase)? onPhase,
   }) async => throw RepositoryException(message);
 }

@@ -217,6 +217,182 @@ def _plain_name(plain: str) -> str:
 # sentence so nothing is lost when reassembling.
 _SENTENCE_SPLIT = re.compile(r"([.!?]+(?:\s+|$))")
 
+# Labels commonly printed in urinalysis and stool microscopy reports. For
+# these reports, a glossary rewrite of the whole OCR page is misleading: the
+# patient needs a compact list of the findings that can actually be read.
+_QUALITATIVE_LABELS: tuple[str, ...] = (
+    "colour", "color", "appearance", "clarity", "odour", "odor",
+    "consistency", "blood", "mucus", "food particles", "worms",
+    "parasite eggs", "ova", "cysts", "pus cells", "red blood cells",
+    "rbc", "white blood cells", "wbc", "epithelial cells", "bacteria",
+    "yeast", "crystals", "casts", "protein", "glucose", "ketones",
+    "bilirubin", "urobilinogen", "nitrite", "specific gravity", "ph",
+    "trophozoite", "vegetables", "muscle fibres", "muscles", "starch",
+    "fats", "undigested food",
+)
+_FIELD_LINE = re.compile(
+    r"^\s*[=|*•\-–—]*\s*(?P<label>[A-Za-z][A-Za-z ()/.-]{1,48}?)"
+    r"\s*[:=]\s*(?P<result>\S.{0,159})\s*$"
+)
+_REPORT_ADMIN = re.compile(
+    r"\b(patient\s*(?:id|name)|visit\s*date|print\s*date|referred\s*by|"
+    r"lab\s*data\s*manager|registered\s*patient|report\s*no)\b",
+    re.IGNORECASE,
+)
+_PLAIN_LABELS = {
+    "pus cells": "White blood cells (pus cells)",
+    "wbc": "White blood cells",
+    "white blood cells": "White blood cells",
+    "rbc": "Red blood cells",
+    "red blood cells": "Red blood cells",
+    "ova": "Parasite eggs (ova)",
+    "specific gravity": "Urine concentration (specific gravity)",
+}
+_RECOGNIZED_NUMERIC_MARKERS = (
+    "hba1c", "glucose", "ldl", "hdl", "triglycerides", "cholesterol",
+    "creatinine", "tsh", "haemoglobin", "hemoglobin", "platelets",
+    "wbc", "rbc", "mcv", "mch", "mchc", "rdw", "ferritin", "urea",
+    "sodium", "potassium", "calcium", "alt", "sgpt", "ast", "sgot",
+    "bilirubin", "albumin", "protein", "vitamin d", "vitamin b12", "crp",
+)
+
+
+def _qualitative_report_summary(text: str) -> str | None:
+    """Summarize clearly labelled urine/stool findings without inference.
+
+    Keep each result tied to its recognized label, preserve the OCR wording,
+    and cap the amount shown. If labels or results are too garbled, fall back
+    to the cautious generic message instead of presenting the whole page as a
+    patient-facing explanation.
+    """
+    lower = text.lower()
+    panel = "stool analysis" if re.search(r"\b(stool|faecal|fecal)\b", lower) else (
+        "urine test" if re.search(r"\b(urine|urinalysis)\b", lower) else None
+    )
+    if panel is None:
+        return None
+
+    findings: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        if _REPORT_ADMIN.search(raw_line):
+            continue
+        parsed = _qualitative_field(raw_line)
+        if parsed is None:
+            continue
+        label, result = parsed
+        label = re.sub(r"\s+", " ", label).strip().lower()
+        # Avoid echoing a bare OCR fragment such as `H`, `+`, or punctuation.
+        if len(re.sub(r"[^A-Za-z0-9]", "", result)) < 2:
+            continue
+        display_label = _PLAIN_LABELS.get(label, label.capitalize())
+        item = f"{display_label} - {result}"
+        if item.casefold() in seen:
+            continue
+        seen.add(item.casefold())
+        findings.append(item)
+        if len(findings) == 10:
+            break
+
+    if not findings:
+        return (
+            f"This appears to be a {panel}, but the scan did not yield clearly "
+            "labelled findings that can be summarized reliably. Check the "
+            "original report or try a sharper, well-lit photo. This is not a diagnosis."
+        )
+    return (
+        f"This appears to be a {panel}. Readable entries from the scan:\n"
+        + "\n".join(f"- {finding}" for finding in findings)
+        + "\n\nOCR can miss or duplicate text. Check each entry against the "
+        "original report; this summary is not a diagnosis."
+    )
+
+
+def _qualitative_field(raw_line: str) -> tuple[str, str] | None:
+    """Read a known qualitative row, including common colonless OCR layouts."""
+    from local_label_model import classify_label
+
+    line = raw_line.strip().lstrip("=|*•-–— ").strip()
+    field = _FIELD_LINE.match(line)
+    if field:
+        raw_label = re.sub(r"\s*\([^)]*\)", "", field.group("label")).strip()
+        classified = classify_label(raw_label, minimum_score=0.58)
+        if classified:
+            return classified[0], re.sub(
+                r"\s+", " ", field.group("result")
+            ).strip(" \t:;|=*")
+
+    # Tesseract often drops punctuation and emits e.g. "Pus Cells H 5-6".
+    # Score only short leading spans; never classify the result portion as a
+    # label or modify the source result text.
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", line)
+    best: tuple[str, int, float] | None = None
+    for end in range(1, min(5, len(words)) + 1):
+        candidate = " ".join(words[:end])
+        classified = classify_label(candidate, minimum_score=0.58)
+        if classified and (best is None or classified[1] > best[2]):
+            best = (classified[0], end, classified[1])
+    if best is None:
+        return None
+    result = line
+    for _ in range(best[1]):
+        result = re.sub(r"^\s*[A-Za-z][A-Za-z'-]*", "", result, count=1)
+    result = re.sub(r"^\s*[:=|]*\s*", "", result)
+    return best[0], re.sub(r"\s+", " ", result).strip(" \t:;|=*")
+
+
+def _numeric_report_summary(text: str) -> str | None:
+    """List recognized lab values with only the range printed in the text."""
+    # Local import avoids making the OCR term dictionary depend on trend code
+    # during module initialization.
+    from trends import parse_lab_values
+
+    values = parse_lab_values(text)
+    if not values:
+        return None
+    items: list[str] = []
+    for value in values:
+        if not any(
+            re.search(rf"\b{re.escape(marker)}\b", value.marker, re.IGNORECASE)
+            for marker in _RECOGNIZED_NUMERIC_MARKERS
+        ):
+            continue
+        unit = f" {value.unit}" if value.unit else ""
+        item = f"{value.marker} - {value.raw_value}{unit}"
+        if value.raw_low is not None or value.raw_high is not None:
+            low = value.raw_low if value.raw_low is not None else "—"
+            high = value.raw_high if value.raw_high is not None else "—"
+            item += f" (reported range: {low}–{high})"
+        items.append(item)
+        if len(items) == 10:
+            break
+    if not items:
+        return None
+    return (
+        "We identified these readable lab values in the scan:\n"
+        + "\n".join(f"- {item}" for item in items)
+        + "\n\nOnly ranges printed on the report are shown here. Check each "
+        "entry against the original; this summary is not a diagnosis."
+    )
+
+
+def _looks_like_lab_report(text: str) -> bool:
+    """Detect report-shaped OCR where a glossary rewrite would be misleading."""
+    normalized = text.lower()
+    cues = (
+        "complete blood count", "blood count", "stool analysis", "urine analysis",
+        "urinalysis", "microscopic examination", "macroscopic examination",
+        "laboratory", "lab report", "reference range", "patient id",
+        "test result unit", "unit ref", "immunology unit",
+        "haematology", "hematology", "biochemistry",
+        "lipid profile", "liver function", "renal function", "thyroid profile",
+    )
+    return any(cue in normalized for cue in cues) or bool(
+        re.search(r"\b(?:cbc|urine profile)\b", normalized)
+    ) or bool(
+        re.search(r"\bref(?:erence)?\.?\s*range\b", normalized)
+    )
+
 
 @dataclass(frozen=True)
 class SimplifyResult:
@@ -241,6 +417,38 @@ def simplify_text(text: str) -> SimplifyResult:
             terms_simplified=0,
             sentence_count=0,
             note="No text to simplify.",
+        )
+
+    structured_summary = _qualitative_report_summary(text)
+    if structured_summary is not None:
+        return SimplifyResult(
+            simplified_text=structured_summary,
+            terms_simplified=0,
+            sentence_count=len([line for line in structured_summary.splitlines() if line.strip()]),
+            note="Readable findings are listed from the scan; check them against the original report.",
+        )
+
+    if _looks_like_lab_report(text):
+        numeric_summary = _numeric_report_summary(text)
+        if numeric_summary is not None:
+            return SimplifyResult(
+                simplified_text=numeric_summary,
+                terms_simplified=0,
+                sentence_count=len(
+                    [line for line in numeric_summary.splitlines() if line.strip()]
+                ),
+                note="Recognized values are listed with source wording; check them against the original report.",
+            )
+        message = (
+            "We couldn’t confidently identify the findings in this scan. "
+            "The original text is available below; check it against the "
+            "paper report or try a sharper, well-lit photo. This is not a diagnosis."
+        )
+        return SimplifyResult(
+            simplified_text=message,
+            terms_simplified=0,
+            sentence_count=1,
+            note="The scan did not contain findings that could be summarized reliably.",
         )
 
     sentences = [s for s in _SENTENCE_SPLIT.split(text) if s.strip()]

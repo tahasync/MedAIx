@@ -41,21 +41,24 @@ const Map<String, dynamic> _sample = <String, dynamic>{
         <String, dynamic>{
           'report_id': 1,
           'date': '2026-03-02',
-          'label': 'Mar',
+          'date_source': 'report',
+          'label': '2026-03-02',
           'value': 5.9,
           'status': 'ok',
         },
         <String, dynamic>{
           'report_id': 2,
           'date': '2026-06-10',
-          'label': 'Jun',
+          'date_source': 'report',
+          'label': '2026-06-10',
           'value': 6.1,
           'status': 'warn',
         },
         <String, dynamic>{
           'report_id': 3,
           'date': '2026-10-20',
-          'label': 'Oct',
+          'date_source': 'upload',
+          'label': '2026-10-20',
           'value': 6.4,
           'status': 'error',
         },
@@ -84,7 +87,8 @@ const Map<String, dynamic> _sample = <String, dynamic>{
         <String, dynamic>{
           'report_id': 3,
           'date': '2026-10-20',
-          'label': 'Oct',
+          'date_source': 'upload',
+          'label': '2026-10-20',
           'value': 52,
           'status': 'ok',
         },
@@ -126,13 +130,16 @@ void main() {
       expect(hba1c.pointCount, 3);
       expect(hba1c.hasAlert, isTrue);
       expect(hba1c.series.threshold, 6.0);
-      expect(hba1c.series.rangeLabel, '3 reports · Mar to Oct');
+      expect(
+        hba1c.series.rangeLabel,
+        '3 results · Report 2026-03-02 to Uploaded 2026-10-20',
+      );
       expect(hba1c.series.alertTitle, 'Rising 3 times in a row');
       expect(hba1c.series.points.map((p) => p.value), <double>[5.9, 6.1, 6.4]);
-      expect(hba1c.series.points.map((p) => p.label), <String>[
-        'Mar',
-        'Jun',
-        'Oct',
+      expect(hba1c.series.points.map((p) => p.date.toIso8601String()), <String>[
+        '2026-03-02T00:00:00.000Z',
+        '2026-06-10T00:00:00.000Z',
+        '2026-10-20T00:00:00.000Z',
       ]);
     });
 
@@ -140,7 +147,7 @@ void main() {
       final MarkerTrend hdl = trendOverviewFromJson(_sample).trends.last;
 
       expect(hdl.series.threshold, 40);
-      expect(hdl.series.rangeLabel, '1 report so far');
+      expect(hdl.series.rangeLabel, '1 result · Uploaded 2026-10-20');
       expect(hdl.hasAlert, isFalse);
       expect(hdl.direction, TrendDirection.stable);
       expect(hdl.latestStatus, ValueStatus.ok);
@@ -156,6 +163,22 @@ void main() {
       expect(o.needsReports, isTrue);
       expect(o.insight, isNull);
       expect(o.trends, isEmpty);
+    });
+
+    test('ignores points with missing or invalid date provenance', () {
+      final MarkerTrend trend = markerTrendFromJson(<String, dynamic>{
+        'marker': 'Ferritin',
+        'points': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'date': 'Oct',
+            'value': 40,
+            'date_source': 'upload',
+          },
+          <String, dynamic>{'date': '2026-10-01', 'value': 41},
+        ],
+      });
+      expect(trend.series.points, isEmpty);
+      expect(trend.series.threshold, isNull);
     });
 
     test('byMarker ignores case and spacing', () {

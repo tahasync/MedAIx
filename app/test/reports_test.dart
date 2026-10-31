@@ -203,13 +203,16 @@ void main() {
       await pumpAt(tester, '${AppRoutes.trends}?marker=HbA1c');
 
       expect(find.text('HbA1c trend'), findsOneWidget);
-      expect(find.text('4 reports · Mar to Oct'), findsOneWidget);
+      expect(find.text('Sample data · 4 results'), findsOneWidget);
       expect(
-        find.bySemanticsLabel('HbA1c rose from 5.9 to 6.4 over 4 reports.'),
+        find.bySemanticsLabel(
+          'HbA1c rose from 5.9 on 2026-03-01 (sample date) to 6.4 '
+          'on 2026-10-01 (sample date), across 4 reports.',
+        ),
         findsOneWidget,
       );
-      expect(find.text('Mar 5.9'), findsOneWidget);
-      expect(find.text('Oct 6.4'), findsOneWidget);
+      expect(find.text('Sample 2026-03-01 · 5.9'), findsOneWidget);
+      expect(find.text('Sample 2026-10-01 · 6.4'), findsOneWidget);
       expect(find.text('Rising 3 times in a row'), findsOneWidget);
       expect(find.text('Find a specialist'), findsOneWidget);
       handle.dispose();
@@ -218,7 +221,7 @@ void main() {
     testWidgets('an unknown marker shows the empty state', (tester) async {
       await pumpAt(tester, '${AppRoutes.trends}?marker=Ferritin');
 
-      expect(find.text('Ferritin trend'), findsOneWidget);
+      expect(find.text('Trend details'), findsOneWidget);
       expect(find.text('Not enough reports yet'), findsOneWidget);
       expect(find.text('Upload report'), findsOneWidget);
     });
@@ -255,7 +258,7 @@ void main() {
       await tester.tap(find.text('LDL'));
       await tester.pumpAndSettle();
       expect(find.text('LDL trend'), findsOneWidget);
-      expect(find.text('3 reports · Mar to Oct'), findsOneWidget);
+      expect(find.text('Sample data · 3 results'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Back'));
       await tester.pumpAndSettle();

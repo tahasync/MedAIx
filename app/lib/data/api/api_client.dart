@@ -81,6 +81,13 @@ class ApiClient {
   static bool _isRetryableStatus(int? statusCode) =>
       statusCode == null || statusCode >= 500;
 
+  /// An upload is not safe to repeat after a timeout or connection reset: the
+  /// server may have stored it before the response was lost. Only retry the
+  /// gateway's explicit cold-start responses, which arrive before the API
+  /// handles the request.
+  static bool _isUploadRetryableStatus(int? statusCode) =>
+      statusCode == 502 || statusCode == 503;
+
   /// Total attempts for `/upload-report`, delay between them.
   ///
   /// Mirrors [_healthAttempts]/[_retryDelay] so the report flow survives a cold
@@ -178,6 +185,7 @@ class ApiClient {
   Future<OcrUploadResult> uploadReport(
     String filePath, {
     String language = 'english',
+    String? uploadId,
     Duration timeout = const Duration(seconds: 90),
   }) async {
     for (var attempt = 1; ; attempt++) {
@@ -185,11 +193,12 @@ class ApiClient {
         return await _attemptUpload(
           filePath,
           language: language,
+          uploadId: uploadId,
           timeout: timeout,
         );
       } on ApiException catch (error) {
         final isLast = attempt >= _uploadAttempts;
-        if (isLast || !_isRetryableStatus(error.statusCode)) rethrow;
+        if (isLast || !_isUploadRetryableStatus(error.statusCode)) rethrow;
         await Future<void>.delayed(_uploadRetryDelay);
       }
     }
@@ -201,6 +210,7 @@ class ApiClient {
   Future<OcrUploadResult> _attemptUpload(
     String filePath, {
     required String language,
+    String? uploadId,
     required Duration timeout,
   }) async {
     final request = http.MultipartRequest(
@@ -208,6 +218,9 @@ class ApiClient {
       Uri.parse('$baseUrl/upload-report'),
     );
     request.fields['language'] = language;
+    if (uploadId != null && uploadId.isNotEmpty) {
+      request.fields['upload_id'] = uploadId;
+    }
     request.headers.addAll(_authorized({}));
 
     final file = await File(filePath).readAsBytes();
