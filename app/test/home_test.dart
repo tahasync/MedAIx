@@ -30,7 +30,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AiInsightCard), findsOneWidget);
-    expect(find.text('AI insight'), findsOneWidget);
+    expect(find.text('Automated insight'), findsOneWidget);
     expect(find.text('Sample HbA1c trend'), findsOneWidget);
     expect(find.text('See the trend'), findsOneWidget);
   });

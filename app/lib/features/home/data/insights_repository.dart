@@ -6,6 +6,7 @@
 library;
 
 import '../../reports/data/report_models.dart';
+import '../../reports/data/severity.dart';
 
 class Insight {
   const Insight({
@@ -31,19 +32,21 @@ class Insight {
 }
 
 /// Which way a marker moved over its last readings.
-enum TrendDirection { rising, falling, stable }
+enum TrendDirection { rising, falling, stable, unavailable }
 
 extension TrendDirectionX on TrendDirection {
   String get label => switch (this) {
     TrendDirection.rising => 'Rising',
     TrendDirection.falling => 'Falling',
     TrendDirection.stable => 'Stable',
+    TrendDirection.unavailable => '',
   };
 
   static TrendDirection parse(String? raw) => switch (raw) {
     'rising' => TrendDirection.rising,
     'falling' => TrendDirection.falling,
-    _ => TrendDirection.stable,
+    'stable' => TrendDirection.stable,
+    _ => TrendDirection.unavailable,
   };
 }
 
@@ -154,6 +157,7 @@ MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
           date: DateTime.parse('${p['date']}T00:00:00Z'),
           dateSource: p['date_source'] as String,
           value: (p['value'] as num).toDouble(),
+          severity: p['severity'] as String? ?? 'unknown',
         ),
   ];
   final double? high = (range['high'] as num?)?.toDouble();
@@ -167,7 +171,9 @@ MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
     unit: unit,
     focus: json['focus'] as bool? ?? false,
     direction: TrendDirectionX.parse(json['direction'] as String?),
-    latestStatus: _statusFrom(lastStatus),
+    latestStatus: points.isEmpty || points.last.severity == 'unknown'
+        ? _statusFrom(lastStatus)
+        : severityStatus(points.last.severity),
     pointCount: points.length,
     series: TrendSeries(
       marker: marker,
@@ -176,7 +182,11 @@ MarkerTrend markerTrendFromJson(Map<String, dynamic> json) {
       // The dashed line is the upper limit; markers with only a lower limit
       // (HDL) draw that instead.
       threshold: high ?? low,
+      low: low,
+      high: high,
+      unitCorrected: json['unit_corrected'] as bool? ?? false,
       rangeLabel: _rangeLabel(points.length, points, range['label'] as String?),
+      referenceRangeLabel: range['label'] as String?,
       alertTitle: alert?['title'] as String?,
       alertBody: alert?['body'] as String?,
     ),
@@ -194,28 +204,21 @@ ValueStatus _statusFrom(String? raw) => switch (raw) {
 /// back to the server's range label when there is a single point.
 String _rangeLabel(int count, List<TrendPoint> points, String? range) {
   if (count >= 2) {
-    return '$count results · ${_dateLabel(points.first)} to '
-        '${_dateLabel(points.last)}';
+    final String span = points.first.date.year == points.last.date.year
+        ? '${_shortDate(points.first.date)} – ${_shortDate(points.last.date)}'
+        : '${_shortDate(points.first.date)} – ${_shortDate(points.last.date)}';
+    return '$count readings · $span';
   }
-  if (count == 1) return '1 result · ${_dateLabel(points.first)}';
+  if (count == 1) return '1 reading · ${_shortDate(points.first.date)}';
   return range ?? '';
 }
 
-String _dateLabel(TrendPoint point) =>
-    '${_dateSourceLabel(point.dateSource)} '
-    '${point.date.year.toString().padLeft(4, '0')}-'
-    '${point.date.month.toString().padLeft(2, '0')}-'
-    '${point.date.day.toString().padLeft(2, '0')}';
+String _shortDate(DateTime date) =>
+    '${date.day} ${const <String>['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][date.month - 1]} ${date.year}';
 
 bool _isIsoDate(String value) =>
     RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) &&
     DateTime.tryParse(value)?.toIso8601String().substring(0, 10) == value;
-
-String _dateSourceLabel(String source) => switch (source) {
-  'report' => 'Report',
-  'sample' => 'Sample',
-  _ => 'Uploaded',
-};
 
 bool _validMarker(String value) {
   final String name = value.trim();

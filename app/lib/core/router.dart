@@ -1,11 +1,13 @@
-/// go_router table and the signed-in shell (§4 of the UI master prompt).
+/// go_router table and the signed-in shell (route table in
+/// docs/engineering-guide.md §1).
 ///
 /// Five tabs — Home, Reports, Meds, Wellness, More — each a
 /// `StatefulShellBranch` so sub-routes keep their parent tab highlighted and
 /// their own back stack. The nav is hidden during onboarding and while the
 /// keyboard is up. Sign-in and onboarding live outside the shell.
 ///
-/// Public paths follow the prompt (`/upload`, `/report/:id`, `/scan`,
+/// Public paths follow the route table in docs/engineering-guide.md §1
+/// (`/upload`, `/report/:id`, `/scan`,
 /// `/profile`, …) via redirect aliases onto the nested locations go_router
 /// needs to build the branch stack (`/reports/upload`, `/reports/:id`, …),
 /// so Back from a sub-route always lands on its tab root.
@@ -144,7 +146,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.gallery,
         builder: (context, state) => const GalleryScreen(),
       ),
-      // Public aliases from the prompt onto the nested locations.
+      // Public aliases from the route table in docs/engineering-guide.md §1.
       GoRoute(path: '/upload', redirect: (_, _) => AppRoutes.upload),
       GoRoute(path: '/trends', redirect: (_, _) => AppRoutes.trends),
       GoRoute(

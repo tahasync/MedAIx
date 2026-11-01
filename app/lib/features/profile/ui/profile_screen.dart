@@ -204,7 +204,7 @@ class _ProfileReadView extends StatelessWidget {
           child: ListRows(
             rows: [
               ListRow(
-                title: 'Help with first',
+                title: 'First health goal',
                 trailing: _Value(optionLabel(kGoalOptions, p.firstGoal)),
               ),
               ListRow(
@@ -634,7 +634,7 @@ class _ProfileEditFormState extends ConsumerState<_ProfileEditForm> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const QuestionTitle('Help with first', first: true),
+              const QuestionTitle('First health goal', first: true),
               GoalChoice(
                 value: _firstGoal,
                 enabled: enabled,

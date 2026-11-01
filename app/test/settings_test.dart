@@ -113,10 +113,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapText(tester, 'Export my data');
-      expect(
-        find.text('Export is coming soon. Your data stays on your account.'),
-        findsOneWidget,
-      );
+      expect(find.text('Your data export is ready.'), findsOneWidget);
     });
 
     testWidgets('Sign out asks first, then returns to sign-in', (tester) async {

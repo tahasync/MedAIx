@@ -11,7 +11,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/router.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
+import '../../../theme/ai_surface.dart';
 import '../data/report_models.dart';
+import '../data/severity.dart';
 import '../data/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../providers/trends_providers.dart';
@@ -142,7 +144,8 @@ class _ReportBody extends StatelessWidget {
   /// the first value, else HbA1c.
   String get _trendMarker {
     for (final ReportValue v in report.values) {
-      if (v.status == ValueStatus.warn || v.status == ValueStatus.error) {
+      if (severityStatus(v.statusText) == ValueStatus.warn ||
+          severityStatus(v.statusText) == ValueStatus.error) {
         return v.name;
       }
     }
@@ -156,11 +159,16 @@ class _ReportBody extends StatelessWidget {
     final bool hasOriginal = report.originalText.trim().isNotEmpty;
     final bool lowConfidence =
         report.confidence != null && report.confidence! < kLowConfidence;
-    final String plain = report.hasValues
+    final String plainRaw = report.hasValues
         ? report.summary
         : (report.simplifiedText.trim().isNotEmpty
               ? report.simplifiedText
               : report.summary);
+    final String plain = plainRaw
+        .split(RegExp(r'\r?\n'))
+        .where((line) => !line.trimLeft().startsWith('-'))
+        .join('\n')
+        .trim();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -205,7 +213,7 @@ class _ReportBody extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.cardGap),
         ],
-        AppCard(
+        AiSurface(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -300,14 +308,28 @@ class _ValueCard extends StatelessWidget {
               const SizedBox(width: AppSpace.lg),
               Flexible(
                 child: StatusLabel(
-                  status: value.status,
-                  text: value.statusText,
+                  status: severityStatus(value.statusText),
+                  text: severityLabel(value.statusText),
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpace.xs),
           Text(value.value, style: text.titleLarge),
+          if (value.unitCorrected) ...[
+            const SizedBox(height: AppSpace.xs),
+            Text(
+              'Unit corrected from the scan',
+              style: text.bodySmall?.copyWith(color: c.muted),
+            ),
+          ],
+          if (value.rangeLabel != null) ...[
+            const SizedBox(height: AppSpace.xs),
+            Text(
+              value.rangeLabel!,
+              style: text.bodySmall?.copyWith(color: c.muted),
+            ),
+          ],
           const SizedBox(height: AppSpace.xs),
           Text(
             value.explanation,

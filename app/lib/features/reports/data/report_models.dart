@@ -29,6 +29,8 @@ class ReportValue {
     required this.status,
     required this.statusText,
     required this.explanation,
+    this.rangeLabel,
+    this.unitCorrected = false,
   });
 
   /// e.g. "HbA1c".
@@ -43,6 +45,8 @@ class ReportValue {
 
   /// One plain-language line.
   final String explanation;
+  final String? rangeLabel;
+  final bool unitCorrected;
 }
 
 /// A stored report. Lists carry the summary fields; [values], [summary]
@@ -65,6 +69,8 @@ class LabReport {
     this.hasSimplified = false,
     this.language = ReportLanguage.english,
     this.parseNote,
+    this.statusCode,
+    this.duplicate = false,
   });
 
   final int id;
@@ -76,7 +82,7 @@ class LabReport {
   final String dateLabel;
   final DateTime? date;
 
-  /// Overall status and its word: "2 need attention" / "All normal" /
+  /// Overall status and its word: "2 need attention" / "All read values in range" /
   /// "Ready to read".
   final ValueStatus status;
   final String statusText;
@@ -99,6 +105,8 @@ class LabReport {
   /// Set when the parser recovered only some of the printed rows, e.g.
   /// "We read 4 of 9 values". The original photo stays the source of truth.
   final String? parseNote;
+  final String? statusCode;
+  final bool duplicate;
 
   bool get hasValues => values.isNotEmpty;
 
@@ -118,6 +126,8 @@ class LabReport {
     bool? hasSimplified,
     ReportLanguage? language,
     String? parseNote,
+    String? statusCode,
+    bool? duplicate,
   }) {
     return LabReport(
       id: id,
@@ -136,6 +146,8 @@ class LabReport {
       hasSimplified: hasSimplified ?? this.hasSimplified,
       language: language ?? this.language,
       parseNote: parseNote ?? this.parseNote,
+      statusCode: statusCode ?? this.statusCode,
+      duplicate: duplicate ?? this.duplicate,
     );
   }
 }
@@ -146,6 +158,7 @@ class TrendPoint {
     required this.date,
     required this.dateSource,
     required this.value,
+    this.severity = 'unknown',
   });
 
   final DateTime date;
@@ -153,6 +166,7 @@ class TrendPoint {
   /// `report`, `upload`, or `sample` for obviously synthetic fixtures.
   final String dateSource;
   final double value;
+  final String severity;
 }
 
 /// A marker's history plus the threshold and the alert copy that goes with
@@ -163,7 +177,11 @@ class TrendSeries {
     required this.unit,
     required this.points,
     this.threshold,
+    this.low,
+    this.high,
+    this.unitCorrected = false,
     required this.rangeLabel,
+    this.referenceRangeLabel,
     this.alertTitle,
     this.alertBody,
   });
@@ -174,9 +192,13 @@ class TrendSeries {
 
   /// A real reference boundary, when one exists.
   final double? threshold;
+  final double? low;
+  final double? high;
+  final bool unitCorrected;
 
   /// Count and actual date span.
   final String rangeLabel;
+  final String? referenceRangeLabel;
   final String? alertTitle;
   final String? alertBody;
 

@@ -8,6 +8,7 @@ import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/reports/data/report_models.dart';
 import 'package:tahasync_medaix/features/reports/ui/reports_screen.dart';
+import 'package:tahasync_medaix/features/reports/ui/trends_screen.dart';
 
 import 'support/test_app.dart';
 
@@ -37,7 +38,7 @@ void main() {
       expect(find.textContaining('18 Oct'), findsOneWidget);
       expect(find.byType(StatusLabel), findsNWidgets(3));
       expect(find.text('2 need attention'), findsOneWidget);
-      expect(find.text('All normal'), findsNWidgets(2));
+      expect(find.text('All read values in range'), findsNWidgets(2));
       expect(
         find.widgetWithText(PrimaryButton, 'Upload report'),
         findsOneWidget,
@@ -204,6 +205,7 @@ void main() {
 
       expect(find.text('HbA1c trend'), findsOneWidget);
       expect(find.text('Sample data · 4 results'), findsOneWidget);
+      expect(find.text('Normal 4.0–6.0 %'), findsOneWidget);
       expect(
         find.bySemanticsLabel(
           'HbA1c rose from 5.9 on 2026-03-01 (sample date) to 6.4 '
@@ -211,8 +213,8 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Sample 2026-03-01 · 5.9'), findsOneWidget);
-      expect(find.text('Sample 2026-10-01 · 6.4'), findsOneWidget);
+      expect(find.text('1 Mar 2026 · 5.9 %'), findsOneWidget);
+      expect(find.text('1 Oct 2026 · 6.4 %'), findsOneWidget);
       expect(find.text('Rising 3 times in a row'), findsOneWidget);
       expect(find.text('Find a specialist'), findsOneWidget);
       handle.dispose();
@@ -229,6 +231,8 @@ void main() {
     testWidgets('Find a specialist opens the doctor screen', (tester) async {
       await pumpAt(tester, '${AppRoutes.trends}?marker=HbA1c');
 
+      await tester.ensureVisible(find.text('Find a specialist'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Find a specialist'));
       await tester.pumpAndSettle();
       expect(find.text('Find a doctor'), findsOneWidget);
@@ -246,7 +250,7 @@ void main() {
       expect(find.text('Fasting glucose'), findsOneWidget);
       expect(find.text('LDL'), findsOneWidget);
       expect(find.textContaining('Latest 6.4 %'), findsOneWidget);
-      expect(find.text('Borderline'), findsOneWidget);
+      expect(find.text('High'), findsOneWidget);
       expect(find.text('Normal'), findsNWidgets(2));
     });
 
@@ -283,6 +287,32 @@ void main() {
       expect(find.textContaining('You have one report.'), findsOneWidget);
       expect(find.text('Upload report'), findsOneWidget);
       expect(find.byType(AiInsightCard), findsNothing);
+    });
+
+    testWidgets('chart fits 320 dp at 200% text in both themes', (
+      tester,
+    ) async {
+      for (final ThemeMode mode in <ThemeMode>[
+        ThemeMode.light,
+        ThemeMode.dark,
+      ]) {
+        await usePhone(tester, size: const Size(320, 640));
+        await tester.pumpWidget(
+          testScreen(
+            const TrendsScreen(marker: 'HbA1c'),
+            themeMode: mode,
+            size: const Size(320, 640),
+            textScale: 2,
+            overrides: <Override>[
+              insightsRepositoryProvider.overrideWithValue(
+                FakeInsightsRepository(latency: Duration.zero),
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$mode trend layout');
+      }
     });
   });
 

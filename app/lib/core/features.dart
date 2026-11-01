@@ -54,6 +54,7 @@ final class FeatureFlags {
   /// Sprint 13 — doctor portal and reminders.
   bool get doctorPortal => sprint >= 13;
   bool get reminders => sprint >= 13;
+  bool get dataExport => sprint >= 13;
 }
 
 /// The flags for this build. Override in tests to reach gated screens.

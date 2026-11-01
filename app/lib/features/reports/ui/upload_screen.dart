@@ -12,6 +12,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/router.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../../theme/ai_surface.dart';
 import '../../../theme/app_theme.dart';
 import '../data/report_models.dart';
 import '../providers/reports_providers.dart';
@@ -244,56 +245,65 @@ class _ReadingView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  IconTile(icon: LucideIcons.fileText),
-                  const SizedBox(width: AppSpace.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          fileName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpace.lg),
-              Semantics(
-                label: phase.label,
-                liveRegion: true,
-                child: LinearProgressIndicator(
-                  minHeight: AppSize.progressBar,
-                  backgroundColor: context.colors.surface2,
-                  color: context.colors.primary,
-                ),
-              ),
-              const SizedBox(height: AppSpace.md),
-              Text(
-                'This can take a little while. Your report stays saved if '
-                'the explanation needs a retry.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
-              ),
-            ],
-          ),
-        ),
+        phase == UploadPhase.explaining
+            ? AiSurface(child: _readingCardContent(context))
+            : AppCard(child: _readingCardContent(context)),
         const SizedBox(height: AppSpace.cardGap),
         const SkeletonCard(height: 136),
         const SizedBox(height: AppSpace.gridGap),
         const SkeletonBox(height: 60),
         const SizedBox(height: AppSpace.gridGap),
         const SkeletonBox(height: 60),
+      ],
+    );
+  }
+
+  Widget _readingCardContent(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            IconTile(icon: LucideIcons.fileText),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Text(
+                fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+        if (phase == UploadPhase.explaining)
+          AiBusyAction(
+            busy: true,
+            child: PrimaryButton(
+              label: 'Explaining report',
+              loading: true,
+              onPressed: null,
+            ),
+          )
+        else
+          Semantics(
+            label: phase.label,
+            liveRegion: true,
+            child: LinearProgressIndicator(
+              minHeight: AppSize.progressBar,
+              backgroundColor: context.colors.surface2,
+              color: context.colors.primary,
+            ),
+          ),
+        const SizedBox(height: AppSpace.md),
+        Text(
+          'This can take a little while. Your report stays saved if '
+          'the explanation needs a retry.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
+        ),
       ],
     );
   }

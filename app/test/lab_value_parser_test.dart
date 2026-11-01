@@ -10,7 +10,7 @@ void main() {
       final v = values.single;
       expect(v.name, 'HbA1c');
       expect(v.value, '6.4 %');
-      expect(v.status, ValueStatus.warn);
+      expect(v.status, ValueStatus.error);
       expect(v.statusText, 'High');
       expect(v.explanation, contains('Average blood sugar'));
       expect(v.explanation, contains('Normal is 4 to 6.'));
@@ -47,16 +47,20 @@ Eosinophils 01 - 06 % 02
 
         expect(values, hasLength(12));
         expect(values[0].name, 'Haemoglobin');
-        expect(values[0].value, '10.5 g/dl');
+        expect(values[0].value, '10.5 g/dL');
         expect(values[0].statusText, 'Low');
-        expect(values[1].value, '13 x10^3/uL');
+        expect(values[1].value, '13 ×10³/µL');
         expect(values[1].statusText, 'High');
-        expect(values[2].value, '4.03 x10^6/uL');
+        expect(values[2].value, '4.03 ×10⁶/µL');
         expect(values[3].value, '35 %');
         expect(values[4].value, '86.8 fL');
-        expect(values[5].value, '26.8 %');
-        expect(values[6].value, '30.9 %');
-        expect(values[7].value, '331 x10^3/uL');
+        expect(values[5].value, '26.8 pg');
+        expect(values[6].value, '30.9 g/dL');
+        expect(values[5].unitCorrected, isTrue);
+        expect(values[6].unitCorrected, isTrue);
+        expect(values[7].value, '331 ×10³/µL');
+        expect(values[0].unitCorrected, isTrue);
+        expect(values[1].unitCorrected, isTrue);
         expect(values[8].value, '65 %');
         expect(values[9].value, '31 %');
         expect(values[10].value, '2 %');
@@ -73,7 +77,7 @@ Eosinophils 01 - 06 % 02
         'Haemoglobin 11.5 - 16.0 g/dl1 10.5\n'
         'WBC 4 - 11 x10^3/uLt 13.0',
       );
-      expect(values.map((value) => value.value), ['10.5 g/dl', '13 x10^3/uL']);
+      expect(values.map((value) => value.value), ['10.5 g/dL', '13 ×10³/µL']);
     });
 
     test('just past the limit is Slightly high / Slightly low', () {
@@ -87,13 +91,13 @@ Eosinophils 01 - 06 % 02
       );
     });
 
-    test('far past the limit is Very high / Very low with error status', () {
+    test('far past the limit is critical with error status', () {
       final high = parseLabValues('TSH 7.2 mIU/L (0.4 - 4.0)').single;
       expect(high.status, ValueStatus.error);
-      expect(high.statusText, 'Very high');
+      expect(high.statusText, 'Critical');
       final low = parseLabValues('Ferritin 4 ng/mL (12 - 150)').single;
       expect(low.status, ValueStatus.error);
-      expect(low.statusText, 'Very low');
+      expect(low.statusText, 'Critical');
     });
 
     test('"< limit" ranges', () {
@@ -109,7 +113,7 @@ Eosinophils 01 - 06 % 02
       expect(ok.status, ValueStatus.ok);
       expect(ok.explanation, contains('Normal is over 40.'));
       final low = parseLabValues('HDL 32 mg/dL (> 40)').single;
-      expect(low.status, ValueStatus.warn);
+      expect(low.status, ValueStatus.error);
       expect(low.statusText, 'Low');
     });
 

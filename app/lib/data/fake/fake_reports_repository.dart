@@ -153,7 +153,7 @@ class FakeReportsRepository implements ReportsRepository {
       dateLabel: '12 Aug 2026',
       date: DateTime(2026, 8, 12),
       status: ValueStatus.ok,
-      statusText: 'All normal',
+      statusText: 'All read values in range',
       summary: 'All of your cholesterol values are in the normal range.',
       values: const <ReportValue>[
         ReportValue(
@@ -185,7 +185,7 @@ class FakeReportsRepository implements ReportsRepository {
       dateLabel: '2 Jun 2026',
       date: DateTime(2026, 6, 2),
       status: ValueStatus.ok,
-      statusText: 'All normal',
+      statusText: 'All read values in range',
       summary: 'Everything on this report is within the normal range.',
       values: const <ReportValue>[
         ReportValue(
@@ -213,25 +213,32 @@ class FakeReportsRepository implements ReportsRepository {
         date: DateTime.utc(2026, 3, 1),
         dateSource: 'sample',
         value: 5.9,
+        severity: 'normal',
       ),
       TrendPoint(
         date: DateTime.utc(2026, 6, 1),
         dateSource: 'sample',
         value: 6.1,
+        severity: 'slightly_high',
       ),
       TrendPoint(
         date: DateTime.utc(2026, 8, 1),
         dateSource: 'sample',
         value: 6.2,
+        severity: 'slightly_high',
       ),
       TrendPoint(
         date: DateTime.utc(2026, 10, 1),
         dateSource: 'sample',
         value: 6.4,
+        severity: 'high',
       ),
     ],
     threshold: 6.0,
+    low: 4.0,
+    high: 6.0,
     rangeLabel: 'Sample data · 4 results',
+    referenceRangeLabel: 'Normal range 4.0–6.0 %',
     alertTitle: 'Rising 3 times in a row',
     alertBody: 'This isn’t a diagnosis. A doctor can confirm with more tests.',
   );

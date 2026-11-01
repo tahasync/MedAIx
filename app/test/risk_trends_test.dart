@@ -45,6 +45,7 @@ const Map<String, dynamic> _sample = <String, dynamic>{
           'label': '2026-03-02',
           'value': 5.9,
           'status': 'ok',
+          'severity': 'normal',
         },
         <String, dynamic>{
           'report_id': 2,
@@ -53,6 +54,7 @@ const Map<String, dynamic> _sample = <String, dynamic>{
           'label': '2026-06-10',
           'value': 6.1,
           'status': 'warn',
+          'severity': 'slightly_high',
         },
         <String, dynamic>{
           'report_id': 3,
@@ -61,6 +63,7 @@ const Map<String, dynamic> _sample = <String, dynamic>{
           'label': '2026-10-20',
           'value': 6.4,
           'status': 'error',
+          'severity': 'high',
         },
       ],
       'alert': <String, dynamic>{
@@ -82,7 +85,7 @@ const Map<String, dynamic> _sample = <String, dynamic>{
         'label': 'Normal range 40 mg/dL and above',
         'source': 'default',
       },
-      'direction': 'stable',
+      'direction': null,
       'points': <Map<String, dynamic>>[
         <String, dynamic>{
           'report_id': 3,
@@ -91,6 +94,7 @@ const Map<String, dynamic> _sample = <String, dynamic>{
           'label': '2026-10-20',
           'value': 52,
           'status': 'ok',
+          'severity': 'normal',
         },
       ],
       'alert': null,
@@ -130,10 +134,7 @@ void main() {
       expect(hba1c.pointCount, 3);
       expect(hba1c.hasAlert, isTrue);
       expect(hba1c.series.threshold, 6.0);
-      expect(
-        hba1c.series.rangeLabel,
-        '3 results · Report 2026-03-02 to Uploaded 2026-10-20',
-      );
+      expect(hba1c.series.rangeLabel, '3 readings · 2 Mar 2026 – 20 Oct 2026');
       expect(hba1c.series.alertTitle, 'Rising 3 times in a row');
       expect(hba1c.series.points.map((p) => p.value), <double>[5.9, 6.1, 6.4]);
       expect(hba1c.series.points.map((p) => p.date.toIso8601String()), <String>[
@@ -147,9 +148,9 @@ void main() {
       final MarkerTrend hdl = trendOverviewFromJson(_sample).trends.last;
 
       expect(hdl.series.threshold, 40);
-      expect(hdl.series.rangeLabel, '1 result · Uploaded 2026-10-20');
+      expect(hdl.series.rangeLabel, '1 reading · 20 Oct 2026');
       expect(hdl.hasAlert, isFalse);
-      expect(hdl.direction, TrendDirection.stable);
+      expect(hdl.direction, TrendDirection.unavailable);
       expect(hdl.latestStatus, ValueStatus.ok);
     });
 

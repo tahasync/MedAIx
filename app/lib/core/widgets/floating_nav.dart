@@ -53,7 +53,10 @@ class FloatingNav extends StatelessWidget {
           decoration: BoxDecoration(
             color: c.surface2,
             borderRadius: AppRadius.navAll,
-            boxShadow: AppShadow.nav,
+            boxShadow: c.isDark ? const [] : AppShadow.nav,
+            border: c.isDark
+                ? Border(top: BorderSide(color: c.hairline))
+                : null,
           ),
           // Nav labels are short by design; cap their scale so the bar keeps
           // its 64 dp height at 200 % system text size.

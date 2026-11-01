@@ -123,13 +123,12 @@ class SettingsScreen extends ConsumerWidget {
                   title: 'Profile and health details',
                   onTap: () => context.go(AppRoutes.profile),
                 ),
-                ListRow(
-                  title: 'Export my data',
-                  onTap: () => showToast(
-                    context,
-                    'Export is coming soon. Your data stays on your account.',
+                if (features.dataExport)
+                  ListRow(
+                    title: 'Export my data',
+                    onTap: () =>
+                        showToast(context, 'Your data export is ready.'),
                   ),
-                ),
                 ListRow(title: 'Sign out', onTap: () => _signOut(context, ref)),
                 ListRow(
                   title: 'Delete my data',
@@ -149,7 +148,7 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => showInfoSheet(
                     context,
                     title: 'Frequently asked questions',
-                    paragraphs: _faq,
+                    paragraphs: _faq(features),
                   ),
                 ),
                 ListRow(
@@ -157,7 +156,7 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => showInfoSheet(
                     context,
                     title: 'Troubleshooting',
-                    paragraphs: _troubleshooting,
+                    paragraphs: _troubleshooting(features),
                   ),
                 ),
                 ListRow(
@@ -177,27 +176,33 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-const List<String> _faq = <String>[
+List<String> _faq(FeatureFlags features) => <String>[
   'MedAIx reads your lab reports and explains each value in plain language. '
       'It is not a diagnosis; always confirm anything that worries you with '
       'your doctor.',
-  'Your reports and health details are stored on your account and are only '
-      'shared when you create a time-limited code for a doctor.',
-  'Reminders are delivered on this device only, so turning them on here '
-      'does not affect your other devices.',
+  if (features.share)
+    'Your reports and health details are stored on your account and are only '
+        'shared when you create a time-limited code for a doctor.',
+  if (features.reminders)
+    'Reminders are delivered on this device only, so turning them on here '
+        'does not affect your other devices.',
 ];
 
-const List<String> _troubleshooting = <String>[
+List<String> _troubleshooting(FeatureFlags features) => <String>[
   'If a report could not be read, retake the photo in good light with the '
       'whole page in frame. Nothing is saved until the values are found.',
   'If the app says you are offline, your changes are kept on the device and '
       'sync automatically when the connection returns.',
   'Signing out and back in refreshes your account data. Your reports stay '
       'saved on your account.',
+  if (features.share)
+    'A time-limited doctor code can be created from Share with doctor.',
+  if (features.reminders)
+    'Reminders are stored and delivered on this device only.',
 ];
 
 const List<String> _support = <String>[
-  'Email support@medaix.app with a short description of what happened. '
+  'Email synctaha@gmail.com with a short description of what happened. '
       'Please don’t include report photos in the email.',
   'We reply within two working days. For anything urgent about your health, '
       'contact your doctor or local emergency services.',

@@ -273,14 +273,17 @@ Widget _chipsSection(BuildContext context) {
             spacing: AppSpace.xl,
             runSpacing: AppSpace.md,
             children: [
-              StatusLabel(status: ValueStatus.ok, text: 'All normal'),
+              StatusLabel(
+                status: ValueStatus.ok,
+                text: 'All read values in range',
+              ),
               StatusLabel(status: ValueStatus.warn, text: 'Slightly high'),
               StatusLabel(status: ValueStatus.error, text: 'Risky together'),
               StatusLabel(status: ValueStatus.neutral, text: 'No range'),
             ],
           ),
           _gap(),
-          const CardTag(icon: LucideIcons.sparkles, label: 'AI insight'),
+          const CardTag(icon: LucideIcons.sparkles, label: 'Automated insight'),
           CardTag(
             icon: LucideIcons.triangleAlert,
             label: 'Rising 3 times in a row',
@@ -353,6 +356,16 @@ Widget _cardsSection(BuildContext context) {
         ),
       ),
       _gap(AppSpace.cardGap),
+      Container(
+        padding: const EdgeInsets.all(AppSpace.card),
+        decoration: BoxDecoration(
+          color: c.surfaceModal,
+          borderRadius: AppRadius.cardAll,
+          border: Border.all(color: c.hairline),
+        ),
+        child: Text('Modal surface', style: text.bodyMedium),
+      ),
+      _gap(AppSpace.cardGap),
       AppCard(
         tone: CardTone.raised,
         child: Text('Raised card on surface2', style: text.bodyMedium),
@@ -374,6 +387,14 @@ Widget _cardsSection(BuildContext context) {
         body: '5.9 in March to 6.4 now. Worth raising with your doctor.',
         actionLabel: 'See the trend',
         onAction: () {},
+      ),
+      _gap(AppSpace.cardGap),
+      AiInsightCard(
+        title: 'Explaining your report',
+        body: 'Your report stays saved while the explanation is prepared.',
+        actionLabel: 'Explaining report',
+        onAction: () {},
+        loading: true,
       ),
       _gap(AppSpace.cardGap),
       SummaryRow(

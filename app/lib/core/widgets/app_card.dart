@@ -55,7 +55,10 @@ class AppCard extends StatelessWidget {
     Widget card = Material(
       color: fill,
       clipBehavior: Clip.antiAlias,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.cardAll),
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.cardAll,
+        side: BorderSide(color: c.isDark ? Colors.transparent : c.hairline),
+      ),
       child: body,
     );
 

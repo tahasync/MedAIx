@@ -1,6 +1,6 @@
 /// Trends (mockup `trends`). Without `?marker=` it lists every value the
 /// server tracks across the user's reports; with one it shows that marker's
-/// history as a flat line chart with a dashed threshold, the point labels,
+/// history as a flat line chart with a reference band and reading list,
 /// and the alert card. Values come from `GET /risk-trends` and are shown
 /// exactly as returned.
 library;
@@ -17,6 +17,7 @@ import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
 import '../../home/data/insights_repository.dart';
 import '../data/report_models.dart';
+import '../data/severity.dart';
 import '../data/reports_repository.dart';
 import '../providers/trends_providers.dart';
 
@@ -155,7 +156,7 @@ class _OverviewBody extends StatelessWidget {
         : '${t.pointCount} reports';
     final String subtitle = latest.isEmpty
         ? count
-        : 'Latest $latest · $count · ${t.direction.label}';
+        : 'Latest $latest · $count${t.direction.label.isEmpty ? '' : ' · ${t.direction.label}'}';
     return ListRow(
       key: ValueKey<String>('trend-row-${t.marker}'),
       title: t.marker,
@@ -165,16 +166,14 @@ class _OverviewBody extends StatelessWidget {
           TrendDirection.rising => LucideIcons.trendingUp,
           TrendDirection.falling => LucideIcons.trendingDown,
           TrendDirection.stable => LucideIcons.minus,
+          TrendDirection.unavailable => LucideIcons.minus,
         },
       ),
       trailing: StatusLabel(
         status: t.latestStatus,
-        text: switch (t.latestStatus) {
-          ValueStatus.ok => 'Normal',
-          ValueStatus.warn => 'Borderline',
-          ValueStatus.error => 'Out of range',
-          ValueStatus.neutral => 'Unrated',
-        },
+        text: t.series.points.isEmpty
+            ? 'Unrated'
+            : severityLabel(t.series.points.last.severity),
       ),
       onTap: () => context.push(_markerRoute(t.marker)),
     );
@@ -289,6 +288,23 @@ class _TrendBody extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (series.points.length == 1) ...[
+                Text(
+                  'One reading so far — add another report to see a trend',
+                  style: text.bodyMedium,
+                ),
+                const SizedBox(height: AppSpace.md),
+              ],
+              if (series.referenceRangeLabel != null) ...[
+                Text(
+                  series.referenceRangeLabel!.replaceFirst(
+                    'Normal range',
+                    'Normal',
+                  ),
+                  style: text.titleSmall,
+                ),
+                const SizedBox(height: AppSpace.sm),
+              ],
               Semantics(
                 container: true,
                 label: series.semanticDescription,
@@ -342,7 +358,7 @@ class _TrendBody extends StatelessWidget {
 /// Mockup `spark()` at 300 × 90; a touch taller so the 5 px dots clear.
 const double _chartHeight = 110;
 
-/// Primary 3 px line with 5 px dots, dashed warn threshold, nothing else.
+/// Primary line and dots over a shaded reference range.
 class _TrendChart extends StatelessWidget {
   const _TrendChart({required this.series});
 
@@ -353,7 +369,8 @@ class _TrendChart extends StatelessWidget {
     final c = context.colors;
     final List<TrendPoint> points = series.points;
     final List<double> ys = <double>[...points.map((p) => p.value)];
-    if (series.threshold case final double threshold) ys.add(threshold);
+    if (series.low case final double low) ys.add(low);
+    if (series.high case final double high) ys.add(high);
     double minY = ys.reduce((a, b) => a < b ? a : b);
     double maxY = ys.reduce((a, b) => a > b ? a : b);
     final double pad = (maxY - minY) == 0 ? 1 : (maxY - minY) * 0.25;
@@ -377,8 +394,18 @@ class _TrendChart extends StatelessWidget {
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(
           show: true,
-          leftTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 42,
+              interval: maxY - minY,
+              getTitlesWidget: (value, meta) => Text(
+                _fmt(value),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelSmall?.copyWith(color: c.muted),
+              ),
+            ),
           ),
           rightTitles: const AxisTitles(
             sideTitles: SideTitles(showTitles: false),
@@ -436,16 +463,16 @@ class _TrendChart extends StatelessWidget {
             }).toList(),
           ),
         ),
-        extraLinesData: ExtraLinesData(
-          horizontalLines: <HorizontalLine>[
-            if (series.threshold case final double threshold)
-              HorizontalLine(
-                y: threshold,
-                color: c.warn,
-                strokeWidth: 1,
-                dashArray: const <int>[4, 5],
-              ),
-          ],
+        rangeAnnotations: RangeAnnotations(
+          horizontalRangeAnnotations: series.low != null && series.high != null
+              ? <HorizontalRangeAnnotation>[
+                  HorizontalRangeAnnotation(
+                    y1: series.low!,
+                    y2: series.high!,
+                    color: c.ok.withValues(alpha: 0.12),
+                  ),
+                ]
+              : const <HorizontalRangeAnnotation>[],
         ),
         lineBarsData: <LineChartBarData>[
           LineChartBarData(
@@ -477,35 +504,68 @@ class _PointLabels extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final TextStyle? style = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(color: c.muted);
+    final TextStyle? style = Theme.of(context).textTheme.bodySmall;
     final List<TrendPoint> points = series.points;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (int i = 0; i < points.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(right: AppSpace.md),
-              child: Text(
-                '${switch (points[i].dateSource) {
-                  'report' => 'Report',
-                  'sample' => 'Sample',
-                  _ => 'Uploaded',
-                }} '
-                '${_fullDate(points[i].date)} · ${_fmt(points[i].value)}',
-                style: style,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.start,
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Dates use the report date when available; otherwise the upload date.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: c.muted),
+        ),
+        if (series.unitCorrected)
+          Text(
+            'Unit corrected from the scan',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: c.muted),
+          ),
+        const SizedBox(height: AppSpace.sm),
+        for (final TrendPoint point in points)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      LucideIcons.calendarDays,
+                      size: AppSize.iconSmall,
+                      color: c.muted,
+                    ),
+                    const SizedBox(width: AppSpace.sm),
+                    Expanded(
+                      child: Text(
+                        '${_readableDate(point.date)} · ${_fmt(point.value)} ${series.unit}'
+                            .trim(),
+                        style: style,
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(
+                    start: AppSize.iconSmall + AppSpace.sm,
+                    top: AppSpace.xs,
+                  ),
+                  child: StatusLabel(
+                    status: severityStatus(point.severity),
+                    text: severityLabel(point.severity),
+                  ),
+                ),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
+
+String _readableDate(DateTime date) =>
+    '${date.day} ${_monthAbbreviation(date.month)} ${date.year}';
 
 double _dayNumber(TrendPoint point) =>
     point.date.millisecondsSinceEpoch / Duration.millisecondsPerDay;

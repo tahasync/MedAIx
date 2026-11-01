@@ -678,6 +678,9 @@ class OcrUploadResult {
     required this.confidence,
     required this.skewCorrectedDegrees,
     required this.language,
+    this.statusCode,
+    this.statusText,
+    this.duplicate = false,
   });
 
   factory OcrUploadResult.fromJson(Map<String, dynamic> json) {
@@ -688,6 +691,9 @@ class OcrUploadResult {
       skewCorrectedDegrees:
           (json['skew_corrected_degrees'] as num?)?.toDouble() ?? 0,
       language: json['language'] as String? ?? 'english',
+      statusCode: json['status_code'] as String?,
+      statusText: json['status_text'] as String?,
+      duplicate: json['duplicate'] as bool? ?? false,
     );
   }
 
@@ -696,6 +702,9 @@ class OcrUploadResult {
   final double confidence;
   final double skewCorrectedDegrees;
   final String language;
+  final String? statusCode;
+  final String? statusText;
+  final bool duplicate;
 
   /// Below this the server would have rejected the upload, so anything that
   /// reaches the success state is at or above the floor. Used only to warn
@@ -712,6 +721,8 @@ class SimplifyResult {
     this.termsSimplified,
     this.sentenceCount,
     required this.note,
+    this.statusCode,
+    this.statusText,
   });
 
   factory SimplifyResult.fromJson(Map<String, dynamic> json) {
@@ -722,6 +733,8 @@ class SimplifyResult {
       termsSimplified: (json['terms_simplified'] as num?)?.toInt(),
       sentenceCount: (json['sentence_count'] as num?)?.toInt(),
       note: json['note'] as String? ?? '',
+      statusCode: json['status_code'] as String?,
+      statusText: json['status_text'] as String?,
     );
   }
 
@@ -731,6 +744,8 @@ class SimplifyResult {
   final int? termsSimplified;
   final int? sentenceCount;
   final String note;
+  final String? statusCode;
+  final String? statusText;
 }
 
 /// One row from `GET /reports`, used by the report-history screen.
@@ -747,6 +762,8 @@ class ReportSummary {
     this.valuesRead,
     this.valuesExpected,
     this.parseNote,
+    this.statusCode,
+    this.statusText,
   });
 
   factory ReportSummary.fromJson(Map<String, dynamic> json) {
@@ -762,6 +779,8 @@ class ReportSummary {
       valuesRead: (json['values_read'] as num?)?.toInt(),
       valuesExpected: (json['values_expected'] as num?)?.toInt(),
       parseNote: json['parse_note'] as String?,
+      statusCode: json['status_code'] as String?,
+      statusText: json['status_text'] as String?,
     );
   }
 
@@ -776,4 +795,6 @@ class ReportSummary {
   final int? valuesRead;
   final int? valuesExpected;
   final String? parseNote;
+  final String? statusCode;
+  final String? statusText;
 }

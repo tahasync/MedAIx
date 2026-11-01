@@ -42,16 +42,14 @@ class ApiReportsRepository implements ReportsRepository {
       _titles[row.id] = row.title;
       if (row.parseNote != null) _parseNotes[row.id] = row.parseNote!;
       final int attention = row.attentionCount;
-      final (ValueStatus status, String statusText) = !row.hasSimplified
-          ? (ValueStatus.neutral, 'Not explained yet')
-          : attention == 0
-          ? (ValueStatus.ok, 'All normal')
-          : (
-              ValueStatus.warn,
-              attention == 1
-                  ? '1 needs attention'
-                  : '$attention need attention',
-            );
+      final (ValueStatus status, String statusText) = _status(
+        row.statusCode,
+        row.statusText,
+        hasSimplified: row.hasSimplified,
+        valuesRead: row.valuesRead,
+        attention: attention,
+        parseNote: row.parseNote,
+      );
       return LabReport(
         id: row.id,
         title: row.title,
@@ -63,6 +61,7 @@ class ApiReportsRepository implements ReportsRepository {
         confidence: row.confidence,
         hasSimplified: row.hasSimplified,
         parseNote: row.parseNote,
+        statusCode: row.statusCode,
       );
     }).toList();
   });
@@ -94,6 +93,7 @@ class ApiReportsRepository implements ReportsRepository {
         dateLabel: 'Today',
         date: DateTime.now(),
         language: language,
+        duplicate: ocr.duplicate,
       );
     }
     return _detail(
@@ -102,6 +102,7 @@ class ApiReportsRepository implements ReportsRepository {
       date: DateTime.now(),
       confidence: ocr.confidence,
       language: language,
+      duplicate: ocr.duplicate,
     );
   });
 
@@ -110,6 +111,7 @@ class ApiReportsRepository implements ReportsRepository {
     required String dateLabel,
     required DateTime date,
     required ReportLanguage language,
+    bool duplicate = false,
   }) {
     final List<ReportValue> values = parseLabValues(result.text);
     final int attention = values
@@ -119,14 +121,13 @@ class ApiReportsRepository implements ReportsRepository {
               value.status == ValueStatus.error,
         )
         .length;
-    final (ValueStatus status, String statusText) = values.isEmpty
-        ? (ValueStatus.neutral, 'Explanation pending')
-        : attention == 0
-        ? (ValueStatus.ok, 'All normal')
-        : (
-            ValueStatus.warn,
-            attention == 1 ? '1 needs attention' : '$attention need attention',
-          );
+    final (ValueStatus status, String statusText) = _status(
+      result.statusCode,
+      result.statusText,
+      hasSimplified: false,
+      valuesRead: values.length,
+      attention: attention,
+    );
     return LabReport(
       id: result.id,
       title: guessReportTitle(result.text),
@@ -140,6 +141,8 @@ class ApiReportsRepository implements ReportsRepository {
       confidence: result.confidence,
       hasSimplified: false,
       language: language,
+      statusCode: result.statusCode,
+      duplicate: duplicate,
     );
   }
 
@@ -167,6 +170,7 @@ class ApiReportsRepository implements ReportsRepository {
     DateTime? date,
     double? confidence,
     ReportLanguage language = ReportLanguage.english,
+    bool duplicate = false,
   }) {
     final List<ReportValue> values = parseLabValues(r.originalText);
     final int attention = values
@@ -174,14 +178,13 @@ class ApiReportsRepository implements ReportsRepository {
           (v) => v.status == ValueStatus.warn || v.status == ValueStatus.error,
         )
         .length;
-    final (ValueStatus status, String statusText) = values.isEmpty
-        ? (ValueStatus.ok, 'Ready to read')
-        : attention == 0
-        ? (ValueStatus.ok, 'All normal')
-        : (
-            ValueStatus.warn,
-            attention == 1 ? '1 needs attention' : '$attention need attention',
-          );
+    final (ValueStatus status, String statusText) = _status(
+      r.statusCode,
+      r.statusText,
+      hasSimplified: true,
+      valuesRead: values.length,
+      attention: attention,
+    );
     return LabReport(
       id: r.id,
       title: _titles[r.id] ?? guessReportTitle(r.originalText),
@@ -199,6 +202,8 @@ class ApiReportsRepository implements ReportsRepository {
       hasSimplified: true,
       language: language,
       parseNote: _parseNotes[r.id],
+      statusCode: r.statusCode,
+      duplicate: duplicate,
     );
   }
 
@@ -214,6 +219,37 @@ class ApiReportsRepository implements ReportsRepository {
       );
     }
   }
+}
+
+(ValueStatus, String) _status(
+  String? code,
+  String? text, {
+  required bool hasSimplified,
+  required int? valuesRead,
+  required int attention,
+  String? parseNote,
+}) {
+  if (code != null && text != null) {
+    final ValueStatus status = switch (code) {
+      'no_values' || 'not_explained' => ValueStatus.neutral,
+      'attention' => ValueStatus.warn,
+      'partial' || 'in_range' => ValueStatus.ok,
+      _ => ValueStatus.neutral,
+    };
+    return (status, text);
+  }
+  if (!hasSimplified) return (ValueStatus.neutral, 'Not explained yet');
+  if (valuesRead == null || valuesRead == 0) {
+    return (ValueStatus.neutral, 'No values checked');
+  }
+  if (attention > 0) {
+    return (
+      ValueStatus.warn,
+      attention == 1 ? '1 need attention' : '$attention need attention',
+    );
+  }
+  if (parseNote != null) return (ValueStatus.ok, parseNote);
+  return (ValueStatus.ok, 'All read values in range');
 }
 
 class ApiProfileRepository implements ProfileRepository {

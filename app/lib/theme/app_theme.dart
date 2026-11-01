@@ -3,7 +3,7 @@
 ///
 /// Flat, minimal, production design: no gradients, no blur, no translucent
 /// surfaces, no elevation anywhere except the floating nav (which draws its
-/// own shadow). Depth comes from tone â€” `surface` on `background`.
+/// own shadow). Depth comes from tone — `surface` on `background`.
 library;
 
 import 'package:flutter/material.dart';
@@ -19,7 +19,7 @@ abstract final class AppTheme {
   static ThemeData get dark => build(AppColors.dark);
 
   /// Figtree is bundled under `assets/fonts/` (declared in pubspec), so the
-  /// type renders identically offline and on first launch â€” no runtime
+  /// type renders identically offline and on first launch — no runtime
   /// fetch. Falls back to the platform sans if the asset is missing.
   static const List<String> _fallback = <String>['Roboto', 'sans-serif'];
 
@@ -303,10 +303,13 @@ abstract final class AppTheme {
         iconTheme: IconThemeData(color: c.text, size: AppSize.iconTiny),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: c.surface,
+        backgroundColor: c.surfaceModal,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.cardAll),
+        shape: RoundedRectangleBorder(
+          borderRadius: AppRadius.cardAll,
+          side: BorderSide(color: c.isDark ? Colors.transparent : c.hairline),
+        ),
         titleTextStyle: text.titleLarge,
         contentTextStyle: text.bodyMedium?.copyWith(color: c.muted),
         actionsPadding: const EdgeInsets.fromLTRB(
@@ -317,8 +320,8 @@ abstract final class AppTheme {
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: c.surface,
-        modalBackgroundColor: c.surface,
+        backgroundColor: c.surfaceModal,
+        modalBackgroundColor: c.surfaceModal,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         modalElevation: 0,
@@ -372,13 +375,17 @@ abstract final class AppTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
           (states) =>
-              states.contains(WidgetState.selected) ? c.onPrimary : c.text,
+              states.contains(WidgetState.selected) ? c.onPrimary : c.muted,
         ),
         trackColor: WidgetStateProperty.resolveWith(
           (states) =>
               states.contains(WidgetState.selected) ? c.primary : c.surface2,
         ),
-        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? Colors.transparent
+              : c.outlineStrong,
+        ),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith(
@@ -423,11 +430,11 @@ abstract final class AppTheme {
           ),
           foregroundColor: WidgetStateProperty.resolveWith(
             (states) =>
-                states.contains(WidgetState.selected) ? c.onPrimary : c.text,
+                states.contains(WidgetState.selected) ? c.onPrimary : c.muted,
           ),
           iconColor: WidgetStateProperty.resolveWith(
             (states) =>
-                states.contains(WidgetState.selected) ? c.onPrimary : c.text,
+                states.contains(WidgetState.selected) ? c.onPrimary : c.muted,
           ),
           minimumSize: const WidgetStatePropertyAll(
             Size(AppSize.button, AppSize.chipLarge),

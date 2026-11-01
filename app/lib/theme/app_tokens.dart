@@ -1,6 +1,6 @@
 /// Non-colour design tokens: spacing, radii, sizes, motion, type.
-/// Values come straight from design/medaix-mockup.html (§2 of the UI master
-/// prompt). Widgets reference these instead of magic numbers.
+/// Values come straight from design/medaix-mockup.html and
+/// docs/design-system.md §2–§5. Widgets reference these instead of magic numbers.
 library;
 
 import 'package:flutter/widgets.dart';

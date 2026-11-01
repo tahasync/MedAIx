@@ -338,6 +338,9 @@ class AppSwitch extends StatelessWidget {
               decoration: BoxDecoration(
                 color: value ? c.primary : c.surface2,
                 borderRadius: AppRadius.pill,
+                border: value
+                    ? null
+                    : Border.all(color: c.outlineStrong, width: 2),
               ),
               child: AnimatedAlign(
                 duration: d,
@@ -349,9 +352,12 @@ class AppSwitch extends StatelessWidget {
                     width: AppSize.switchThumb,
                     height: AppSize.switchThumb,
                     decoration: BoxDecoration(
-                      color: value ? c.onPrimary : c.text,
+                      color: value ? c.onPrimary : c.muted,
                       shape: BoxShape.circle,
                     ),
+                    child: value
+                        ? Icon(LucideIcons.check, size: 12, color: c.primary)
+                        : null,
                   ),
                 ),
               ),

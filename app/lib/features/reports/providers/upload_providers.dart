@@ -145,11 +145,16 @@ class UploadSuccess extends UploadState {
 
   /// The toast line: "Report ready. 2 values need attention".
   String get toastMessage {
+    if (report.duplicate) return 'You already added this report';
     if (!report.hasSimplified) {
       return 'Report saved. Its explanation is still available to retry.';
     }
     final int n = report.attentionCount;
-    if (n == 0) return 'Report ready. All values look normal';
+    if (n == 0) {
+      return report.values.isEmpty
+          ? report.statusText
+          : 'Report ready. All read values are in range';
+    }
     return n == 1
         ? 'Report ready. 1 value needs attention'
         : 'Report ready. $n values need attention';

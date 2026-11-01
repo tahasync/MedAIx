@@ -21,6 +21,7 @@ void main() {
     expect(f.share, isFalse);
     expect(f.doctorPortal, isFalse);
     expect(f.reminders, isFalse);
+    expect(f.dataExport, isFalse);
   });
 
   test('flags switch on at their roadmap sprint', () {
@@ -33,6 +34,7 @@ void main() {
     expect(const FeatureFlags(12).share, isTrue);
     expect(const FeatureFlags(13).doctorPortal, isTrue);
     expect(const FeatureFlags(13).reminders, isTrue);
+    expect(const FeatureFlags(13).dataExport, isTrue);
     expect(const FeatureFlags.all().sprint, kAllSprints);
   });
 
@@ -107,6 +109,7 @@ void main() {
     expect(find.text('Records'), findsNothing);
     expect(find.text('Share with doctor'), findsNothing);
     expect(find.text('Doctor portal'), findsNothing);
+    expect(find.text('Export my data'), findsNothing);
   });
 
   testWidgets('a demo build (all sprints) shows all five tabs', (tester) async {

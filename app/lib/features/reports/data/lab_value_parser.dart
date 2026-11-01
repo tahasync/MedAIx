@@ -56,8 +56,8 @@ const Map<String, String> _explanations = <String, String>{
   'hb': 'Carries oxygen. Low can mean anaemia.',
   'wbc': 'White cells fight infection.',
   'tlc': 'White cells fight infection.',
-  'platelets': 'Help your blood clot.',
-  'platelet count': 'Help your blood clot.',
+  'platelets': 'Helps your blood clot.',
+  'platelet count': 'Helps your blood clot.',
   'tsh': 'Thyroid signal. High usually means an underactive thyroid.',
   'alt': 'A liver enzyme. High can mean liver strain.',
   'sgpt': 'A liver enzyme. High can mean liver strain.',
@@ -89,11 +89,11 @@ List<ReportValue> parseLabValues(String text) {
         final String? rawUnit = _rangeFirstUnitPattern
             .firstMatch(beforeValue)
             ?.group(0);
-        final String? unit = _cleanOcrUnit(rawUnit);
         final double value = double.parse(trailingValue.namedGroup('value')!);
         final double low = double.parse(rangeFirst.namedGroup('low')!);
         final double high = double.parse(rangeFirst.namedGroup('high')!);
         final String name = _cleanName(rangeFirst.namedGroup('name')!);
+        final String? unit = _cleanOcrUnit(rawUnit, name);
         final (ValueStatus status, String statusText) = _judge(
           value,
           low: low,
@@ -106,6 +106,9 @@ List<ReportValue> parseLabValues(String text) {
             status: status,
             statusText: statusText,
             explanation: _explain(name, status, low: low, high: high),
+            rangeLabel:
+                'Range ${rangeFirst.namedGroup('low')}–${rangeFirst.namedGroup('high')}',
+            unitCorrected: _unitWasCorrected(rawUnit, unit),
           ),
         );
         if (out.length >= _maxValues) break;
@@ -117,11 +120,12 @@ List<ReportValue> parseLabValues(String text) {
 
     final RegExpMatch? m = _linePattern.firstMatch(line);
     if (m == null) continue;
-    final String? unit = m.namedGroup('unit');
+    final String? rawUnit = m.namedGroup('unit');
     final String? range = m.namedGroup('range');
-    if (unit == null && range == null) continue;
+    if (rawUnit == null && range == null) continue;
 
     final String name = _cleanName(m.namedGroup('name')!);
+    final String? unit = _cleanOcrUnit(rawUnit, name);
     if (name.length < 2) continue;
     final double value = double.parse(m.namedGroup('value')!);
 
@@ -143,6 +147,8 @@ List<ReportValue> parseLabValues(String text) {
         status: status,
         statusText: statusText,
         explanation: _explain(name, status, low: low, high: high, gt: gt),
+        rangeLabel: _rangeLabel(m, low, high, gt),
+        unitCorrected: _unitWasCorrected(rawUnit, unit),
       ),
     );
     if (out.length >= _maxValues) break;
@@ -152,14 +158,51 @@ List<ReportValue> parseLabValues(String text) {
 
 double? _num(String? s) => s == null ? null : double.tryParse(s);
 
-String? _cleanOcrUnit(String? unit) {
-  if (unit == null) return null;
-  final String lower = unit.toLowerCase();
-  if (lower.endsWith('/dl1') || lower.endsWith('/ult')) {
-    return unit.substring(0, unit.length - 1);
+String? _rangeLabel(RegExpMatch match, double? low, double? high, double? gt) {
+  if (low != null && high != null) {
+    return 'Range ${match.namedGroup('low')}–${match.namedGroup('high')}';
   }
-  return unit;
+  if (match.namedGroup('lt') case final String value) {
+    return 'Range under $value';
+  }
+  if (gt != null) return 'Range over ${match.namedGroup('gt')}';
+  return null;
 }
+
+String? _cleanOcrUnit(String? unit, String marker) {
+  if (unit == null) return null;
+  final String key = marker.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+  String cleaned = unit;
+  if (cleaned.toLowerCase().endsWith('/dl1') ||
+      cleaned.toLowerCase().endsWith('/ult')) {
+    cleaned = cleaned.substring(0, cleaned.length - 1);
+  }
+  final String compact = cleaned
+      .toLowerCase()
+      .replaceAll('μ', 'µ')
+      .replaceAll(' ', '');
+  if ((key == 'wbc' ||
+          key == 'wbctlc' ||
+          key == 'tlc' ||
+          key == 'platelets' ||
+          key == 'plateletcount') &&
+      RegExp(r'^x?10(?:\^|\*)?3/(?:u|µ)l$').hasMatch(compact)) {
+    return '×10³/µL';
+  }
+  if ((key == 'rbc' || key == 'totalrbc') &&
+      RegExp(r'^x?10(?:\^|\*)?6/(?:u|µ)l$').hasMatch(compact)) {
+    return '×10⁶/µL';
+  }
+  if (key == 'mch' && cleaned == '%') return 'pg';
+  if (key == 'mchc' && cleaned == '%') return 'g/dL';
+  if (cleaned.toLowerCase() == 'g/dl') return 'g/dL';
+  if (cleaned.toLowerCase() == 'mg/dl') return 'mg/dL';
+  if (cleaned.toLowerCase() == 'fl') return 'fL';
+  return cleaned;
+}
+
+bool _unitWasCorrected(String? original, String? canonical) =>
+    original != null && canonical != null && original != canonical;
 
 String _fmt(double v) =>
     v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
@@ -196,17 +239,17 @@ const double _far = 0.5;
 }
 
 (ValueStatus, String) _above(double value, double high) {
-  if (value > high * (1 + _far)) return (ValueStatus.error, 'Very high');
+  if (value > high * (1 + _far)) return (ValueStatus.error, 'Critical');
   if (value <= high * (1 + _slightly)) {
     return (ValueStatus.warn, 'Slightly high');
   }
-  return (ValueStatus.warn, 'High');
+  return (ValueStatus.error, 'High');
 }
 
 (ValueStatus, String) _below(double value, double low) {
-  if (value < low * (1 - _far)) return (ValueStatus.error, 'Very low');
+  if (value < low * (1 - _far)) return (ValueStatus.error, 'Critical');
   if (value >= low * (1 - _slightly)) return (ValueStatus.warn, 'Slightly low');
-  return (ValueStatus.warn, 'Low');
+  return (ValueStatus.error, 'Low');
 }
 
 /// Looks a marker up by its whole name, then by any whole word in it, so

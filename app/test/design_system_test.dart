@@ -1,4 +1,4 @@
-/// Design-system guards (§8 of the UI master prompt): the palette matches
+/// Design-system guards (docs/design-system.md §7): the palette matches
 /// the mockup exactly, text/background pairs clear WCAG AA in both themes,
 /// interactive components meet the 48 dp hit target, and `lib/` contains no
 /// blur, shadow, gradient or hex-literal escape hatches.
@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
+import 'package:tahasync_medaix/theme/ai_surface.dart';
 import 'package:tahasync_medaix/theme/app_theme.dart';
 
 import 'support/test_app.dart';
@@ -28,34 +29,47 @@ String _hex(Color c) =>
 void main() {
   group('palette drift guard', () {
     const Map<String, String> dark = <String, String>{
-      'background': '#0E0D15',
-      'surface': '#141A2A',
-      'surface2': '#202D4E',
-      'primary': '#7C83AD',
-      'onPrimary': '#0E0D15',
-      'text': '#EEEAF2',
-      'muted': '#A9AEC8',
-      'ok': '#5FB89A',
-      'warn': '#E0B15C',
-      'error': '#E5768A',
+      'background': '#0E1726',
+      'surface': '#1E293B',
+      'surface2': '#273449',
+      'surfaceModal': '#334155',
+      'primary': '#A8B0D5',
+      'onPrimary': '#0E1726',
+      'text': '#F1F5F9',
+      'muted': '#A3B1C6',
+      'ai': '#BDA7FF',
+      'aiFill': '#9333EA',
+      'onAiFill': '#FFFFFF',
+      'ok': '#34D399',
+      'warn': '#FBBF24',
+      'error': '#F87171',
+      'hairline': '#334155',
+      'outlineStrong': '#8A99AE',
     };
     const Map<String, String> light = <String, String>{
-      'background': '#F7F4F2',
+      'background': '#F8FAFC',
       'surface': '#FFFFFF',
-      'surface2': '#E6E8F2',
+      'surface2': '#E8EDF4',
+      'surfaceModal': '#FFFFFF',
       'primary': '#182346',
       'onPrimary': '#FFFFFF',
-      'text': '#0E0D15',
-      'muted': '#4D5575',
-      'ok': '#1F7A5C',
-      'warn': '#8A5A00',
-      'error': '#B3283F',
+      'text': '#0F172A',
+      'muted': '#475569',
+      'ai': '#6D45E8',
+      'aiFill': '#6D45E8',
+      'onAiFill': '#FFFFFF',
+      'ok': '#047857',
+      'warn': '#92400E',
+      'error': '#B91C1C',
+      'hairline': '#E2E8F0',
+      'outlineStrong': '#64748B',
     };
 
     Map<String, Color> tokens(AppColors c) => <String, Color>{
       'background': c.background,
       'surface': c.surface,
       'surface2': c.surface2,
+      'surfaceModal': c.surfaceModal,
       'primary': c.primary,
       'onPrimary': c.onPrimary,
       'text': c.text,
@@ -63,16 +77,21 @@ void main() {
       'ok': c.ok,
       'warn': c.warn,
       'error': c.error,
+      'hairline': c.hairline,
+      'outlineStrong': c.outlineStrong,
+      'ai': c.ai,
+      'aiFill': c.aiFill,
+      'onAiFill': c.onAiFill,
     };
 
-    test('dark tokens match §2', () {
+    test('dark tokens match docs/design-system.md §2', () {
       final Map<String, Color> t = tokens(AppColors.dark);
       for (final entry in dark.entries) {
         expect(_hex(t[entry.key]!), entry.value, reason: entry.key);
       }
     });
 
-    test('light tokens match §2', () {
+    test('light tokens match docs/design-system.md §2', () {
       final Map<String, Color> t = tokens(AppColors.light);
       for (final entry in light.entries) {
         expect(_hex(t[entry.key]!), entry.value, reason: entry.key);
@@ -136,6 +155,35 @@ void main() {
         }
       });
     }
+
+    test('all text roles clear each surface layer', () {
+      for (final AppColors c in <AppColors>[AppColors.light, AppColors.dark]) {
+        final surfaces = <Color>[
+          c.background,
+          c.surface,
+          c.surface2,
+          c.surfaceModal,
+        ];
+        final textRoles = <Color>[c.text, c.muted, c.ai, c.primary];
+        for (int role = 0; role < textRoles.length; role++) {
+          for (int surface = 0; surface < surfaces.length; surface++) {
+            expect(
+              _contrast(textRoles[role], surfaces[surface]),
+              greaterThanOrEqualTo(4.5),
+            );
+          }
+        }
+        for (final Color statusColor in <Color>[c.ok, c.warn, c.error]) {
+          for (final Color surface in surfaces) {
+            expect(_contrast(statusColor, surface), greaterThanOrEqualTo(3));
+          }
+        }
+        expect(_contrast(c.onPrimary, c.primary), greaterThanOrEqualTo(4.5));
+        expect(_contrast(c.onAiFill, c.aiFill), greaterThanOrEqualTo(4.5));
+        expect(_contrast(c.outlineStrong, c.surface), greaterThanOrEqualTo(3));
+        expect(_contrast(c.ai, c.surface), greaterThanOrEqualTo(3));
+      }
+    });
   });
 
   group('hit targets', () {
@@ -277,6 +325,56 @@ void main() {
     });
   });
 
+  testWidgets('upload progress fill grows from the leading edge', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      testScreen(
+        Scaffold(
+          body: Center(
+            child: SizedBox(width: 200, child: const ProgressBar(value: 0.25)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder bar = find.byType(ProgressBar);
+    final Rect track = tester.getRect(
+      find.descendant(of: bar, matching: find.byType(ClipRRect)),
+    );
+    final Rect fill = tester.getRect(
+      find.descendant(of: bar, matching: find.byType(AnimatedContainer)),
+    );
+    expect(fill.left, closeTo(track.left, 0.1));
+    expect(fill.width, closeTo(track.width * 0.25, 0.1));
+  });
+
+  testWidgets('AI busy action glows only in dark mode while busy', (
+    tester,
+  ) async {
+    for (final ThemeMode mode in <ThemeMode>[ThemeMode.light, ThemeMode.dark]) {
+      await tester.pumpWidget(
+        testScreen(
+          const AiBusyAction(
+            busy: true,
+            child: SizedBox(width: 120, height: 48),
+          ),
+          themeMode: mode,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final DecoratedBox box = tester.widget<DecoratedBox>(
+        find.descendant(
+          of: find.byType(AiBusyAction),
+          matching: find.byType(DecoratedBox),
+        ),
+      );
+      final shadows = (box.decoration as BoxDecoration).boxShadow;
+      expect(shadows, mode == ThemeMode.dark ? hasLength(1) : isEmpty);
+    }
+  });
+
   group('source integrity', () {
     final Directory lib = Directory('lib');
     final List<File> files = lib
@@ -295,9 +393,12 @@ void main() {
       }
     });
 
-    test('the only shadow is the floating nav token', () {
+    test('shadows stay in tokens and the AI surface file', () {
       for (final File f in files) {
-        if (rel(f).endsWith('theme/app_tokens.dart')) continue;
+        if (rel(f).endsWith('theme/app_tokens.dart') ||
+            rel(f).endsWith('theme/ai_surface.dart')) {
+          continue;
+        }
         expect(
           f.readAsStringSync(),
           isNot(contains('BoxShadow(')),
