@@ -1510,13 +1510,14 @@ def test_report_list_query_does_not_select_original_text() -> None:
         session.add(user)
         session.commit()
 
-        def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
-            if "from reports" in statement.lower():
-                statements.append(statement.lower())
+        def capture(_conn, statement, _multiparams, _parameters, _execution_options):
+            rendered = str(statement).lower()
+            if "from reports" in rendered:
+                statements.append(rendered)
 
-        event.listen(session.get_bind(), "before_cursor_execute", capture)
+        event.listen(session.get_bind(), "before_execute", capture)
         main_module.list_reports(user, session)
-        event.remove(session.get_bind(), "before_cursor_execute", capture)
+        event.remove(session.get_bind(), "before_execute", capture)
         assert statements
         assert all("original_text" not in statement for statement in statements)
     finally:

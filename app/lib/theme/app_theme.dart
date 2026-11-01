@@ -415,7 +415,6 @@ abstract final class AppTheme {
         ),
       ),
       textSelectionTheme: TextSelectionThemeData(
-        cursorColor: c.text,
         selectionColor: c.primary.withValues(alpha: 0.3),
         selectionHandleColor: c.primary,
       ),
