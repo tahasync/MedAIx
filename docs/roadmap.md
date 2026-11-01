@@ -1,11 +1,11 @@
 > **Status: Sprints 1–5 complete.** Sprint 1 delivered report upload and OCR; Sprint 2 delivered simplification, profile storage, and authentication; Sprint 3 delivered risk/trend analysis; Sprint 4 delivers condition-aware wellness tracking with offline-safe logging; Sprint 5 closes the first cross-feature integration pass. See the sprint sections below for recorded checks and limits.
 # MedAIx — 32-Week Solo Execution Plan (Muhammad Taha Naeem)
 
-> **Status:** Sprints 1–5 complete (see detail below). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is the flat mockup [`design/medaix-mockup.html`](../design/medaix-mockup.html), with the rules in [`AGENTS.md`](../AGENTS.md) §3 and the implemented tokens in [`design-system.md`](design-system.md); later sprint features remain on this plan.
+> **Status:** Sprints 1–5 complete (see detail below). Current OCR modes: English, Urdu script, and Roman Urdu. The canonical visual spec is the flat mockup [`design/medaix-mockup.html`](../design/medaix-mockup.html), with the rules in [`engineering-guide.md`](engineering-guide.md) §3 and the implemented tokens in [`design-system.md`](design-system.md); later sprint features remain on this plan.
 
 > **UI foundation (2026-10-25).** The Flutter UI layer — design tokens, component kit, five-tab shell and every screen in the mockup — was built ahead of schedule against `design/medaix-mockup.html`. Medicines, sharing and doctor match remain on in-memory fakes; risk trends became API-backed in Sprint 3 and wellness in Sprint 4. Screens are **gated by sprint**: `app/lib/core/features.dart` reads `MEDAIX_SPRINT` (default **5**) and hides every tab, tile, settings row and route that belongs to a later sprint. `--dart-define=MEDAIX_SPRINT=13` shows everything for a demo. `app/test/feature_gate_test.dart` pins the current sprint.
 
-Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod + Supabase, GitHub Actions CI/CD, spec-first + OpenCode CLI build pattern. No group dependency — every sprint is sequenced so one person can execute it. **Zero-cost stack:** Render's free web service for backend hosting + Neon's free Postgres tier for the database — no Railway, no paid infra anywhere.
+Built on your existing stack/workflow from `foam-shop-erp`: Flutter + Riverpod + Supabase, GitHub Actions CI/CD, and a spec-first build pattern (write a spec for each endpoint and screen, then implement and review it). No group dependency — every sprint is sequenced so one person can execute it. **Zero-cost stack:** Render's free web service for backend hosting + Neon's free Postgres tier for the database — no Railway, no paid infra anywhere.
 
 **Repo setup (Week 0):**
 - **Single monorepo:** `tahasync/medaix/` with `/app` (Flutter) and `/api` (FastAPI) as top-level folders. One repo, one Trello board, one commit history.
@@ -51,7 +51,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 
 ### Week 0 — Setup
 - FastAPI skeleton (`/health` endpoint working), Postgres/SQLite schema (User, Report, Medicine, WellnessLog, QRSession).
-- Flutter skeleton: Riverpod providers structure, routing, theme — reuse Foam Shop's CI/CD setup *structure* (auth and storage are on Supabase), but the visual language is MedAIx's own: brand palette Ink `#0E0D15` / Navy `#182346` / Steel `#3D5387` / Slate `#7C83AD` / Mauve `#BFA9BA`, full light/dark `ColorScheme` + separate error/warning/success semantic colors, styled flat and minimal: depth from surface tone only (`background` → `surface` → `surface2`), no gradients, blur or decorative shadows, the floating bottom nav the single shadowed surface — spec in [`design-system.md`](design-system.md) and [`AGENTS.md`](../AGENTS.md) §3 (this superseded an earlier glass/atmospheric direction described in `color-system.md`).
+- Flutter skeleton: Riverpod providers structure, routing and theme, using MedAIx's own brand palette and corrected light/dark UI tokens. Depth uses `background` → `surface` → `surfaceModal`; light cards use a hairline; dark mode has no black shadows. Automated content follows the limited surface rules in [`design-system.md`](design-system.md) and [`engineering-guide.md`](engineering-guide.md) §3.
 - GitHub Actions: copy foam-shop-erp's APK build workflow, retarget to medaix-app repo.
 - Render web service created for `medaix-api` (free tier); Neon project created for the Postgres DB; confirm `api-deploy.yml` pushes a "hello world" `/health` endpoint live before building real features.
 - Set up `keep-alive.yml` (10-min cron pinging `/health`) and, as a backup since GitHub's scheduled crons can be delayed under load, a free UptimeRobot or cron-job.org monitor hitting the same URL every 5 minutes — verify in the Render dashboard that the service actually stays "Live" instead of cycling to "Suspended" over a few idle hours before you trust it. ✅ **Done** — `keep-alive.yml` on the 10-min cron plus a UptimeRobot HTTP(s) monitor on `https://medaix.onrender.com/health` at 5-minute intervals. Both report the service up; UptimeRobot shows 100% uptime and 0 incidents.
@@ -59,7 +59,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 ### Sprint 1 (Wk 1–2) — Report Upload + OCR (EP-01, PB-01, US-01)
 - Backend: Tesseract OCR integration, `/upload-report` endpoint, image/PDF preprocessing.
 - Frontend: Upload screen (camera/gallery/file picker) — empty state before first upload, skeleton loading during OCR, plain-language error + retry on failure, success confirmation once parsed.
-- Test: Ran 6 sample reports (3 panel types × normal + 3° skew) through the full OCR pipeline. Result: **88.41%–91.53% accuracy, 100/6 pass rate — exceeds the ≥85% target.** Verified by Muhammad Taha Naeem on 2026-11-10; samples + output archived in `D:\Fyp\reports.zip`.
+- Test: Ran 6 sample reports (3 panel types × normal + 3° skew) through the full OCR pipeline. Result: **88.41%–91.53% accuracy, 100% pass rate — exceeds the ≥85% target.** Verified by Muhammad Taha Naeem on date to confirm; samples + output archived in `D:\Fyp\reports.zip`.
 - Optimisation pass (2026-10-25, after the 122-image real-report run below): tuned on the **Train** split, measured on the **Test** split so the numbers are not fitted to themselves. (1) Deskew probe rotation moved from NumPy fancy indexing to Pillow's C rotation — same angles, 0.46 s → 0.02 s per upload; it had been half the OCR time. (2) Tesseract page mode `--psm 6` → `--psm 4` (rows of variable-size text, which is what a results table is): +1.5 confidence points and fewer low-confidence numbers on Train. (3) Noise filter: tokens under 25% confidence that carry no digit and are not a known lab word are dropped — the Arabic header read with the English model ("Saytall", "oayyall") was 8% of all tokens; numbers and dictionary words are always kept. **Test split, before → after:** OCR confidence median **74.7% → 81.6%** (min 52% → 66%, no report under 60%), upload time median **2.2 s → 1.1 s**. The ≥85% target is now met by 26/122 real photos (none before); the rest are bilingual pages where the remaining header residue still counts against the mean.
 
 ### Sprint 2 (Wk 3–4) — NLP Simplification + Profile Storage (EP-01/02, PB-02/03) ✅
@@ -71,7 +71,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 
 ### Sprint 3 (Wk 5–6) — Risk/Trend Analysis (EP-02, PB-03, US-03)
 - ✅ Backend: rule-based trend detection first, `/risk-trends` endpoint implemented; 30+ test cases covering rising/falling streaks, crossed high/low alerts, out-of-range warnings, and insights.
-- ✅ Frontend: trend/alert UI on profile screen (`trends_screen.dart`) with state switching (loading → error → empty → data); trend chart with dashed warn threshold; per-marker detail view; "View trend over time" from ReportScreen.
+- ✅ Frontend: trend/alert UI in `app/lib/features/reports/ui/trends_screen.dart` with state switching (loading → error → empty → data); trend chart with a labelled reference-range band, axis labels and dated readings; per-marker detail view; "View trend over time" from ReportScreen.
 - ✅ Test: 30+ abnormal-value test cases built and verified in `api/tests/test_trends.py`; rising_streak, falling_streak, crossed_high, crossed_low, out_of_range, and insight alerts all verified.
 
 ### Sprint 4 (Wk 7–8) — Wellness Tracking UI (EP-06, PB-07/08/09)
@@ -83,7 +83,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 - ✅ Wire Upload → OCR → NLP → Profile → Risk → Wellness into one continuous flow. Upload retries carry a stable client id; the API returns the already-saved report on replay. If OCR succeeds but explanation is unavailable, the app preserves the report and opens its detail so explanation can be retried without another upload.
 - ✅ Close API contract and cache gaps. Existing report databases gain the nullable upload id and unique per-user index at startup. Profile edits refresh condition-aware trends and wellness goals; health-data deletion clears server and local report, trend, and wellness state. The confirmation now describes the records the API deletes.
 - ✅ Audit the integrated report/profile/trend/wellness screens for their normal, empty, loading, error, success, offline, and applicable permission states. Added regression coverage for retry safety, partial upload success, deletion disclosure, and clearing report history.
-- ✅ Full local regression: `flutter analyze` clean, **235 Flutter tests passed**, **251 API tests passed** (2026-10-31). OCR evaluation also covered 138 Train and 122 Test report images; a 12-image manually transcribed Test sample scored 92.9% row-level precision, recall, and F1. These sample metrics are not full-dataset OCR accuracy.
+- ✅ Full local regression: `flutter analyze` clean, **242 Flutter tests passed**, **268 API tests passed** (2026-11-01). `flutter build apk --debug` also succeeded. OCR evaluation also covered 138 Train and 122 Test report images; a 12-image manually transcribed Test sample scored 92.9% row-level precision, recall, and F1. These sample metrics are not full-dataset OCR accuracy.
 
 ### Sprint 6 (Wk 11–12) — Bug Fixing + Advisor Feedback Round
 - Address advisor feedback from Sem 1 review.
@@ -100,7 +100,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 - Compile Sem 1 documentation package.
 - Build and rehearse defense presentation solo (practice out loud, time yourself).
 
-**Sem 1 checklist:** ☑ OCR ~80–85% ☑ NLP simplification working ☑ Upload/view UI smooth ☑ Profile storage works ☐ Basic risk analysis flags abnormal values ☐ Wellness checklist functional ☐ Every Sem 1 screen has empty/loading/error/success states (Sprints 1–2 screens: done) ☑ Onboarding questionnaire is short and ends in a real first action
+**Sem 1 checklist:** ☑ OCR ~80–85% ☑ NLP simplification working ☑ Upload/view UI smooth ☑ Profile storage works ☑ Basic risk analysis flags abnormal values ☑ Wellness checklist functional ☐ Every Sem 1 screen has empty/loading/error/success states (Sprints 1–2 screens: done) ☑ Onboarding questionnaire is short and ends in a real first action
 
 ---
 
@@ -153,7 +153,7 @@ CTA labels are action-oriented ("Try again", "View report", "Continue offline") 
 ---
 
 ## Solo-Specific Notes
-1. **Lean harder on OpenCode CLI + DeepSeek** than you would in a group plan — draft the spec + prompt for each sprint's backend endpoint and frontend screen separately (same pattern as your Foam Shop HTML-mockup-and-prompt workflow), then review/fix the generated code rather than hand-writing everything.
+1. Write a short spec for each sprint's backend endpoint and frontend screen separately (same pattern as the Foam Shop mockup-and-spec workflow), then build and review each.
 2. **Don't parallelize backend and frontend within a week** — context-switching solo costs more than it saves. Finish the endpoint, then build the screen against it.
 3. **The buffer weeks (13–14, and effectively 27–28) are not optional** — as a solo dev you have no one to absorb a slipped sprint. If you're on pace, use buffer time to get ahead on docs instead of skipping it.
 4. **Security testing (Sprint 13–14) will take you longer solo** — a group can split "attack the QR flow" across two people; you're doing all attack scenarios (expired token reuse, tampered JWT, wrong user access) yourself. Budget real time here, don't rush it.

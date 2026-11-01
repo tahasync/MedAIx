@@ -1,4 +1,4 @@
-﻿"""Install the flat MedAIx brand pack into Android, iOS and in-app assets.
+"""Install the flat MedAIx brand pack into Android, iOS and in-app assets.
 
 Source of truth: ``brand/`` (the zip at ``C:\\Users\\TahaSync\\Downloads\\medaix-brand.zip``).
 This script only resizes those files. It never paints a gradient, glow or
@@ -143,13 +143,6 @@ def main() -> None:
     # Wordmark is the lockup minus the mark; keep the full lockup so a leftover
     # `BrandAssets.wordmark` reference still looks like MedAIx, not a gradient.
     _save(lockup, assets / "wordmark.png")
-
-    brand_app = ROOT / "app/assets/brand"
-    brand_app.mkdir(parents=True, exist_ok=True)
-    for src in BRAND.iterdir():
-        if src.is_file():
-            target = brand_app / src.name
-            target.write_bytes(src.read_bytes())
 
     print("installed flat brand pack (no gradients)")
 

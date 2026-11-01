@@ -2,21 +2,17 @@
 
 The app's UI follows a **flat, minimal, production** direction. The visual
 source of truth is [`design/medaix-mockup.html`](../design/medaix-mockup.html);
-the rules agents must follow are in [`AGENTS.md`](../AGENTS.md) §3. This page
+the engineering rules are in [`engineering-guide.md`](engineering-guide.md) §3. This page
 documents what is implemented in `app/lib/theme` and `app/lib/core/widgets`.
-
-An earlier exploration with the `ui-ux-pro-max` skill ("Soft UI Evolution",
-brand accent gradient, hero glow) is kept verbatim in
-[`design-system-skill-output.md`](design-system-skill-output.md) for the
-record. **It is superseded**: there are no gradients, glows, blurs or
-decorative shadows in the shipped app, and
+The shipped direction is flat and minimal: there are no gradients, glows, blurs
+or decorative shadows outside the defined AI-surface and light-nav exceptions,
 [`app/test/design_system_test.dart`](../app/test/design_system_test.dart)
 fails the build if any come back.
 
 ## 1. Principles
 
-- Depth from tone, not elevation: `background` → `surface` → `surface2`, plus
-  `hairline` dividers. The only shadow is under the floating nav.
+- Depth from tone: `background` → `surface` → `surfaceModal`. Light cards use a
+  1 px hairline. Dark mode has no black drop shadows.
 - One colour source: `context.colors.<token>` (`AppColors` ThemeExtension).
   No hex literals or Material swatches outside `lib/theme/`.
 - Status never by colour alone: `StatusLabel` / `CardTag` pair an icon and
@@ -24,31 +20,30 @@ fails the build if any come back.
 - Plain, sentence-case copy; action-named CTAs; errors state data safety.
 - Every screen ships its Normal, Empty, Loading, Error, Success, Offline,
   Permission-denied and Disabled states.
+- Automated content uses the solid tint and 1.5 px border in
+  `app/lib/theme/ai_surface.dart`; dark glow is limited to a busy automated
+  action button. The skeleton shimmer is the only gradient.
 
 ## 2. Colour tokens (`AppColors`)
 
 | Token | Dark | Light | Use |
 | --- | --- | --- | --- |
-| `background` | `#0E0D15` | `#F7F4F2` | scaffold |
-| `surface` | `#141A2A` | `#FFFFFF` | cards |
-| `surface2` | `#202D4E` | `#E6E8F2` | raised tiles, inputs, ghost buttons, chips, nav |
-| `primary` | `#7C83AD` | `#182346` | primary buttons, active nav item |
-| `onPrimary` | `#0E0D15` | `#FFFFFF` | text on primary |
-| `text` | `#EEEAF2` | `#0E0D15` | body and headings; toast background |
-| `muted` | `#A9AEC8` | `#4D5575` | secondary text, inactive icons |
-| `ok` / `warn` / `error` | `#5FB89A` / `#E0B15C` / `#E5768A` | `#1F7A5C` / `#8A5A00` / `#B3283F` | status |
-| `hairline` | `#2D3B61` | `#DCDDE8` | row dividers |
+| `background` | `#0E1726` | `#F8FAFC` | canvas |
+| `surface` | `#1E293B` | `#FFFFFF` | cards; light cards have a 1 px hairline |
+| `surface2` | `#273449` | `#E8EDF4` | raised tiles, inputs, ghost buttons, chips, nav |
+| `surfaceModal` | `#334155` | `#FFFFFF` | dialogs and bottom sheets |
+| `primary` / `onPrimary` | `#A8B0D5` / `#0E1726` | `#182346` / `#FFFFFF` | primary actions |
+| `text` | `#F1F5F9` | `#0F172A` | body and headings |
+| `muted` | `#A3B1C6` | `#475569` | secondary text |
+| `ai` / `aiFill` / `onAiFill` | `#BDA7FF` / `#9333EA` / `#FFFFFF` | `#6D45E8` / `#6D45E8` / `#FFFFFF` | automated content |
+| `ok` / `warn` / `error` | `#34D399` / `#FBBF24` / `#F87171` | `#047857` / `#92400E` / `#B91C1C` | status icon and word |
+| `hairline` / `outlineStrong` | `#334155` / `#8A99AE` | `#E2E8F0` / `#64748B` | dividers and visible boundaries |
 | `viewfinder` / `scanFrame` | `#05050A` / `#BFA9BA` | same | scanner |
-| `qrPaper` / `qrInk` | `#FFFFFF` / `#0E0D15` | same | QR tile, brand plate |
+| `qrPaper` / `qrInk` | `#FFFFFF` / `#0E0D15` | same | QR tile |
 
-Brand (logo only): Ink `#0E0D15`, Navy `#182346`, Steel `#3D5387`,
-Slate `#7C83AD`, Mauve `#BFA9BA`.
+Depth uses tone: `background` → `surface` → `surfaceModal`. Automated cards use only `theme/ai_surface.dart`: solid `aiTint`, a 1.5 px `ai` border, and dark `aiGlow` on a busy AI action button. Dark mode has no black drop shadows. Status colour is paired with an icon; on modal surfaces only the icon uses a status colour and the word uses `text`.
 
-Contrast: every text/background pair is ≥ 4.5:1 in both themes; status
-colours on `surface2` are ≥ 3:1 and only ever back an icon beside `text`
-coloured copy. Theme mode (System / Light / Dark) is persisted in
-SharedPreferences and chosen in Settings.
-
+Brand (logo only): Ink `#0E0D15`, Navy `#182346`, Steel `#3D5387`, Slate `#7C83AD`, Mauve `#BFA9BA`. `Brand` stays unchanged.
 ## 3. Spacing, radius, size (`AppSpace`, `AppRadius`, `AppSize`)
 
 | Group | Values |
