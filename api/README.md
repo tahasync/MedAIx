@@ -110,7 +110,8 @@ artifact. It returns only an uncalibrated model score and an out-of-training-
 range notice; it is not a diagnosis, clinical risk tier, or treatment advice.
 The dataset's source and redistribution license have not been verified, and
 this model has no external clinical validation. Do not enable it for patient
-care or include its artifact in a public build.
+care or include its artifact in a public build. This endpoint is research/demo
+only, must remain off in production, and is never wired into the Flutter app.
 
 For the supplied 989-row CSV, the stratified holdout result was ROC-AUC 0.924,
 recall 0.961, specificity 0.725, and Brier score 0.099. Five-fold cross-
@@ -133,7 +134,8 @@ reports a stratified holdout plus five-fold cross-validation. The model excludes
 `Gender` because the dataset's binary encoding is undocumented. Its experimental
 `POST /experimental/anemia-screening` endpoint is separately disabled by
 default; it requires authentication and `MEDAIX_ANEMIA_SCREENING_ENABLED=true`.
-It is not called by report upload, trends, or the Flutter client. The score is
+This endpoint is research/demo only and must remain off in production. It is
+not called by report upload, trends, or the Flutter client. The score is
 not a diagnosis or treatment recommendation.
 
 The other supplied files were inspected but not used as labeled training/test

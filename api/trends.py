@@ -32,6 +32,7 @@ MONTH_ABBR = (
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 )  # fmt: skip
+PARSER_VERSION = 2
 MONTH_NAMES = (
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
@@ -49,6 +50,7 @@ class ParsedValue:
     # The range bounds exactly as printed, for labels ("4.0–6.0" not "4-6").
     raw_low: str | None = None
     raw_high: str | None = None
+    unit_corrected: bool = False
 
 
 # Ordered: the first pattern that matches the marker text wins, so the more
@@ -155,7 +157,8 @@ _MONTH_DATE = re.compile(
     r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,)?\s+(?:19|20)\d{2}\b|"
     r"\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
     r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-    r"Nov(?:ember)?|Dec(?:ember)?)\s+(?:19|20)\d{2}\b",
+    r"Nov(?:ember)?|Dec(?:ember)?)\s+(?:19|20)\d{2}\b|"
+    r"\b\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ]\d{2}\b",
     re.IGNORECASE,
 )
 _NUMERIC_DATE = re.compile(
@@ -188,6 +191,18 @@ def _parse_report_date_token(token: str) -> date | None:
         except ValueError:
             return None
 
+    two_digit = re.fullmatch(r"(\d{1,2})[- ]([A-Za-z]{3,9})[- ](\d{2})", token)
+    if two_digit:
+        day, month_name, year = two_digit.groups()
+        year_num = int(year)
+        year_num += 2000 if year_num <= 69 else 1900
+        try:
+            return datetime.strptime(f"{day} {month_name} {year_num}", "%d %b %Y").date()
+        except ValueError:
+            try:
+                return datetime.strptime(f"{day} {month_name} {year_num}", "%d %B %Y").date()
+            except ValueError:
+                return None
     for pattern in ("%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y"):
         try:
             return datetime.strptime(token, pattern).date()
@@ -246,6 +261,39 @@ def _unit_and_rest(rest: str) -> tuple[str | None, str]:
     if "/" in unit or "%" in unit or unit.lower() in _BARE_UNITS:
         return unit, rest[match.end() :]
     return None, rest
+
+
+_CANONICAL_UNITS: dict[str, dict[str, str]] = {
+    "Haemoglobin": {"g/dl": "g/dL"}, "Haematocrit": {"%": "%"},
+    "Hematocrit": {"%": "%"}, "WBC": {}, "WBC (TLC)": {}, "RBC": {}, "Total RBC": {}, "Platelets": {},
+    "MCV": {"fl": "fL"}, "MCH": {"pg": "pg", "%": "pg"},
+    "MCHC": {"g/dl": "g/dL", "%": "g/dL"},
+    "LDL": {"mg/dl": "mg/dL"}, "HDL": {"mg/dl": "mg/dL"},
+    "Total cholesterol": {"mg/dl": "mg/dL"}, "Triglycerides": {"mg/dl": "mg/dL"},
+    "Fasting glucose": {"mg/dl": "mg/dL", "mmol/l": "mmol/L"},
+    "HbA1c": {"%": "%"},
+}
+
+
+def _canonical_unit(marker: str, unit: str | None) -> tuple[str | None, bool]:
+    if unit is None or marker not in _CANONICAL_UNITS:
+        return unit, False
+    normalized = unit.strip().replace("μ", "µ").replace("Μ", "µ")
+    compact = normalized.casefold().replace(" ", "")
+    if marker in ("WBC", "WBC (TLC)", "Platelets") and (
+        re.fullmatch(r"x?10(?:\^|\*)?3/(?:u|µ)l", compact)
+        or re.fullmatch(r"10(?:\^|\*)?9/l", compact)
+        or compact == "10⁹/l"
+    ):
+        return "×10³/µL", normalized != "×10³/µL"
+    if marker in ("RBC", "Total RBC") and (
+        re.fullmatch(r"x?10(?:\^|\*)?6/(?:u|µ)l", compact)
+        or re.fullmatch(r"10(?:\^|\*)?12/l", compact)
+        or compact == "10¹²/l"
+    ):
+        return "×10⁶/µL", normalized != "×10⁶/µL"
+    canonical = _CANONICAL_UNITS[marker].get(compact)
+    return (canonical, canonical != unit) if canonical is not None else (unit, False)
 
 
 def _reference_range(
@@ -348,8 +396,10 @@ def _parse_line(line: str) -> ParsedValue | None:
     # unit or a printed reference range to support that it is a lab result.
     if not known_marker and unit is None and low is None and high is None:
         return None
+    marker = canonical_marker(name)
+    unit, unit_corrected = _canonical_unit(marker, unit)
     return ParsedValue(
-        marker=canonical_marker(name),
+        marker=marker,
         value=value,
         unit=unit,
         low=low,
@@ -357,6 +407,7 @@ def _parse_line(line: str) -> ParsedValue | None:
         raw_value=raw_value,
         raw_low=raw_low,
         raw_high=raw_high,
+        unit_corrected=unit_corrected,
     )
 
 
@@ -415,6 +466,7 @@ class ParsedQualitativeValue:
 
     marker: str
     result: str
+    reference: str | None = None
 
 
 _QUALITATIVE_RESULT = re.compile(
@@ -454,9 +506,15 @@ def _parse_qualitative_line(line: str) -> ParsedQualitativeValue | None:
     first_word = re.sub(r"[^a-z]", "", name.split()[0].lower())
     if first_word in _NOISE_FIRST_WORDS:
         return None
+    trailing = cleaned[match.end():]
+    reference_match = _QUALITATIVE_RESULT.search(trailing)
+    result = " ".join(match.group("result").lower().split())
+    result += re.match(r"\+{1,2}", trailing.lstrip()).group(0) if re.match(r"\+{1,2}", trailing.lstrip()) else ""
+    reference = " ".join(reference_match.group("result").lower().split()) if reference_match else None
     return ParsedQualitativeValue(
         marker=canonical_marker(name),
-        result=" ".join(match.group("result").lower().split()),
+        result=result,
+        reference=reference,
     )
 
 
@@ -602,6 +660,8 @@ class _Range:
         return {
             "low": self.low,
             "high": self.high,
+            "raw_low": self.raw_low,
+            "raw_high": self.raw_high,
             "label": self.label(unit),
             "source": self.source,
         }
@@ -626,8 +686,8 @@ def _sex_of(user: Any) -> str | None:
 
 # Panel titles come from the detected markers, never the first OCR line
 # (that is usually a letterhead or a patient name).
-_CBC = ("haemoglobin", "hemoglobin", "platelet", "wbc", "rbc", "mcv", "mchc", "mch", "haematocrit", "hematocrit")
-_LIPID = ("ldl", "hdl", "triglycerid", "cholesterol")
+_CBC = ("haemoglobin", "hemoglobin", "platelets?", "wbc", "rbc", "mcv", "mchc", "mch", "haematocrit", "hematocrit")
+_LIPID = ("ldl", "hdl", "triglycerides?", "cholesterol")
 _LIVER = ("alt", "ast", "sgpt", "sgot", "bilirubin", "alp", "ggt")
 _SKIP_CANDIDATE = re.compile(
     r"patient|phone|mrn|\blab\s*id\b|\bage\b|\bsex\b|\bdate\b|\bpage\b|"
@@ -642,21 +702,23 @@ def guess_panel_title(text: str, values: list[ParsedValue] | None = None) -> str
     """A short list title: 'Complete blood count', 'Lipid profile', or 'Lab report'."""
     parsed = values if values is not None else parse_lab_values(text)
     blob = f"{text} {' '.join(v.marker for v in parsed)}".lower()
-    hits = lambda words: sum(1 for word in words if word in blob)
+    hits = lambda words: sum(1 for word in words if re.search(rf"\b{word}\b", blob))
     if hits(_LIPID) >= 2:
         return "Lipid profile"
     if hits(_CBC) >= 2:
         return "Complete blood count"
-    if hits(_LIVER) >= 2:
-        return "Liver function test"
     if "urine" in blob:
         return "Urine test"
+    if "stool" in blob:
+        return "Stool test"
+    if "thyroid" in blob or re.search(r"\btsh\b", blob):
+        return "Thyroid test"
     if "hba1c" in blob or "glycated" in blob:
         return "Blood sugar test"
     if "glucose" in blob or "fasting" in blob:
         return "Blood sugar test"
-    if "tsh" in blob or "thyroid" in blob:
-        return "Thyroid test"
+    if hits(_LIVER) >= 2:
+        return "Liver function test"
     if hits(_CBC) == 1:
         return "Blood test"
     return "Lab report"
@@ -688,7 +750,7 @@ def _is_missing_lab_value(line: str) -> bool:
         return False
     marker = line[: missing.start()].strip(" :;,.-–—=|*#()[]")
     normalized = marker.lower()
-    return any(name in normalized for name in _CBC) or any(
+    return any(re.search(rf"\b{name}\b", normalized) for name in _CBC) or any(
         pattern.search(marker) for pattern, _ in _SYNONYMS
     )
 
@@ -707,6 +769,10 @@ def summarise_report(text: str, sex: str | None = None) -> dict[str, object]:
         range_ = _range_of_parsed(parsed, sex)
         if _status(parsed.value, range_) != STATUS_OK:
             attention += 1
+    attention += sum(
+        1 for parsed in qualitative_values
+        if parsed.reference is not None and parsed.result != parsed.reference
+    )
     read = len(values) + len(qualitative_values)
     note = None
     if expected > read:
@@ -768,21 +834,36 @@ def _width(range_: _Range | None, fallback: float) -> float:
 
 
 def _status(value: float, range_: _Range | None) -> str:
+    severity = _severity(value, range_)
+    if severity == "normal":
+        return STATUS_OK
+    if severity in ("slightly_low", "slightly_high"):
+        return STATUS_WARN
+    return STATUS_ERROR if severity != "unknown" else "neutral"
+
+
+def _severity(value: float, range_: _Range | None) -> str:
     if range_ is None:
-        return "neutral"
+        return "unknown"
+    direction = "high" if range_.high is not None and value > range_.high else "low"
     outside = 0.0
     if range_.high is not None and value > range_.high:
         outside = value - range_.high
     elif range_.low is not None and value < range_.low:
         outside = range_.low - value
-    if outside == 0.0:
-        return STATUS_OK
-    return STATUS_WARN if outside <= _WARN_BAND * _width(range_, value) else STATUS_ERROR
+    else:
+        return "normal"
+    share = outside / _width(range_, value)
+    if share <= _WARN_BAND:
+        return f"slightly_{direction}"
+    if share > 0.5:
+        return "critical"
+    return direction
 
 
-def _direction(values: list[float], width: float) -> str:
+def _direction(values: list[float], width: float) -> str | None:
     if len(values) < 2:
-        return "stable"
+        return None
     back = 2 if len(values) >= 3 else 1
     delta = values[-1] - values[-1 - back]
     if delta > _DIRECTION_BAND * width:
@@ -842,18 +923,22 @@ def _build_trend(marker: str, observations: list[_Observation], sex: str | None,
             "date_source": observation.date_source,
             "label": observation.at.date().isoformat(),
             "value": observation.parsed.value,
+            "raw_value": observation.parsed.raw_value,
             "status": status,
+            "severity": _severity(observation.parsed.value, range_),
         }
         for observation, status in zip(observations, statuses, strict=True)
     ]
     code = _alert_code(values, statuses, range_)
     alert = _alert(code, statuses[-1]) if code else None
+    distinct_dates = {observation.at.date() for observation in observations}
     payload: dict[str, object] = {
         "marker": marker,
         "unit": unit,
+        "unit_corrected": any(observation.parsed.unit_corrected for observation in observations),
         "focus": focus,
         "range": range_.payload(unit) if range_ else None,
-        "direction": _direction(values, _width(range_, values[-1])),
+        "direction": _direction(values, _width(range_, values[-1])) if len(distinct_dates) >= 2 else None,
         "points": points,
         "alert": alert,
     }
@@ -866,7 +951,7 @@ def _build_trend(marker: str, observations: list[_Observation], sex: str | None,
         last_raw=observations[-1].parsed.raw_value,
         first_month=observations[0].at.date().isoformat(),
         last_date=observations[-1].at.date().isoformat(),
-        points_count=len(observations),
+        points_count=len(distinct_dates),
     )
 
 
@@ -891,7 +976,16 @@ def _insight(trends: list[_Trend]) -> dict[str, object] | None:
     else:
         title = f"Your {marker} is outside its normal range"
     if code == "out_of_range":
-        body = f"{marker} is outside its normal range in your latest report."
+        latest = chosen.payload["points"][-1]
+        day_value = datetime.fromisoformat(str(latest["date"]))
+        day = f"{day_value.day} {day_value:%b}"
+        range_payload = chosen.payload.get("range") or {}
+        low, high = range_payload.get("raw_low"), range_payload.get("raw_high")
+        unit = chosen.payload.get("unit") or ""
+        if low is not None and high is not None:
+            body = f"{latest.get('raw_value', latest['value'])} {unit} on {day}. Your report's range is {low}–{high}. Worth raising with your doctor."
+        else:
+            body = f"{latest['value']} {unit} on {day}. This is outside your report's stated range. Worth raising with your doctor."
     else:
         body = (
             f"{chosen.first_raw} on {chosen.first_month} to {chosen.last_raw} "
@@ -940,6 +1034,18 @@ def build_risk_trends(
                     "report" if getattr(report, "report_date_source", None) == "report" and getattr(report, "report_date", None) else "upload",
                 )
             )
+
+    # Identical values on the same effective date are duplicate observations,
+    # even if they came from separate uploaded copies of one report.
+    for marker, observations in series.items():
+        unique: list[_Observation] = []
+        seen: set[tuple[date, float]] = set()
+        for observation in observations:
+            key = (observation.at.date(), observation.parsed.value)
+            if key not in seen:
+                seen.add(key)
+                unique.append(observation)
+        series[marker] = unique
 
     trends = [
         _build_trend(marker, observations, sex, marker in focus)

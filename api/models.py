@@ -95,6 +95,8 @@ class Report(Base):
     values_read = Column(Integer, nullable=True)
     values_expected = Column(Integer, nullable=True)
     parse_note = Column(String, nullable=True)
+    parser_version = Column(Integer, nullable=True)
+    content_hash = Column(String(64), nullable=True)
     uploaded_at = Column(DateTime, default=utc_now)
     processed_at = Column(DateTime, default=utc_now)
 
@@ -105,6 +107,7 @@ class Report(Base):
             "client_upload_id",
             unique=True,
         ),
+        Index("uq_reports_user_content_hash", "user_id", "content_hash", unique=True),
     )
 
     user = relationship("User", back_populates="reports")

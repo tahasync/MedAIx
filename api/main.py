@@ -7,7 +7,10 @@ dependency-free. Feature endpoints land in their own sprint: Sprint 1 added
 """
 
 import io
+import hashlib
 import logging
+import os
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated, Literal
 
@@ -62,7 +65,7 @@ from profile import (
 )
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from simplify import SimplifyResult, simplify_text
-from trends import build_risk_trends, extract_report_date, summarise_report
+from trends import PARSER_VERSION, build_risk_trends, extract_report_date, summarise_report
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +91,47 @@ MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 # user then has to recognise as useless.
 MIN_CONFIDENCE = 30.0
 
+
+def report_status(values_read: int | None, attention: int | None, parse_note: str | None, has_simplified: bool) -> tuple[str, str]:
+    if not has_simplified:
+        return "not_explained", "Not explained yet"
+    if not values_read:
+        return "no_values", "No values checked"
+    if attention:
+        return "attention", f"{attention} need attention"
+    if parse_note:
+        match = re.search(r"We read (\d+) of (\d+) values", parse_note)
+        if match:
+            return "partial", f"Checked {match.group(1)} of {match.group(2)} values"
+        return "partial", parse_note
+    return "in_range", "All read values in range"
+
+
+def _report_status_fields(report: Report) -> dict[str, object]:
+    code, label = report_status(report.values_read, report.attention_count, report.parse_note, bool(report.simplified_text))
+    return {"status_code": code, "status_text": label}
+
+
+def ensure_stamped(report: Report, user: User, db: Session) -> bool:
+    if (report.parser_version or 0) >= PARSER_VERSION:
+        return False
+    _stamp_report(report, user)
+    db.add(report)
+    return True
+
 app = FastAPI(
     title="MedAIx API",
     version="0.1.0",
     description="Clinical decision-support API for MedAIx.",
 )
 
+def parse_cors_origins(value: str | None = None) -> list[str]:
+    return [origin.strip() for origin in (value or "").split(",") if origin.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=parse_cors_origins(os.getenv("CORS_ORIGINS", "")),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -225,6 +260,8 @@ async def upload_report(
                 "values_read": existing.values_read,
                 "values_expected": existing.values_expected,
                 "parse_note": existing.parse_note,
+                **_report_status_fields(existing),
+                "duplicate": False,
             }
 
     payload = await file.read()
@@ -260,12 +297,37 @@ async def upload_report(
             "Try a clearer photo, with the whole page visible and good lighting.",
         )
 
+    content_hash = hashlib.sha256(" ".join(result.text.split()).encode("utf-8")).hexdigest()
+    same_content = (
+        db.query(Report)
+        .filter(Report.user_id == user.id, Report.content_hash == content_hash)
+        .one_or_none()
+    )
+    if same_content is not None:
+        return {
+            "id": same_content.id,
+            "text": same_content.original_text or "",
+            "language": language.value,
+            "confidence": same_content.ocr_confidence or 0,
+            "width": None,
+            "height": None,
+            "skew_corrected_degrees": 0,
+            "title": same_content.title or same_content.derived_title,
+            "attention_count": same_content.attention_count or 0,
+            "values_read": same_content.values_read,
+            "values_expected": same_content.values_expected,
+            "parse_note": same_content.parse_note,
+            **_report_status_fields(same_content),
+            "duplicate": True,
+        }
+
     report = Report(
         user_id=user.id,
         original_text=result.text,
         ocr_confidence=result.confidence,
         image_path=file.filename,
         client_upload_id=upload_id,
+        content_hash=content_hash,
     )
     db.add(report)
     try:
@@ -276,16 +338,20 @@ async def upload_report(
         # Two retries can race past the initial lookup. The unique key keeps
         # one row; resolve the losing request to the winner's stored report.
         db.rollback()
-        if upload_id is None:
-            raise
         existing = (
             db.query(Report)
             .filter(
                 Report.user_id == user.id,
-                Report.client_upload_id == upload_id,
+                Report.content_hash == content_hash,
             )
             .one_or_none()
         )
+        if existing is None and upload_id is not None:
+            existing = (
+                db.query(Report)
+                .filter(Report.user_id == user.id, Report.client_upload_id == upload_id)
+                .one_or_none()
+            )
         if existing is None:
             raise
         return {
@@ -301,6 +367,8 @@ async def upload_report(
             "values_read": existing.values_read,
             "values_expected": existing.values_expected,
             "parse_note": existing.parse_note,
+            **_report_status_fields(existing),
+            "duplicate": existing.content_hash == content_hash,
         }
 
     return {
@@ -316,14 +384,20 @@ async def upload_report(
         "values_read": report.values_read,
         "values_expected": report.values_expected,
         "parse_note": report.parse_note,
+        **_report_status_fields(report),
+        "duplicate": False,
     }
+
+
+class SimplifyReportInput(BaseModel):
+    report_id: int
 
 
 @app.post("/simplify-report")
 def simplify_report(
     user: CurrentUser,
     db: DbSession,
-    payload: dict[str, object],
+    payload: SimplifyReportInput,
 ) -> dict[str, object]:
     """Simplify a stored report's OCR text into plain language.
 
@@ -335,12 +409,7 @@ def simplify_report(
     simplification rewrites medical jargon only -- numbers, units, and
     reference ranges are left verbatim so a result cannot be misread.
     """
-    report_id = payload.get("report_id")
-    if not isinstance(report_id, int) or isinstance(report_id, bool):
-        raise HTTPException(
-            status_code=422,
-            detail="Please send a valid report id (a whole number).",
-        )
+    report_id = payload.report_id
 
     report = db.get(Report, report_id)
     if report is None or report.user_id != user.id:
@@ -354,15 +423,20 @@ def simplify_report(
             detail="That report has no readable text to simplify.",
         )
 
+    stamped = ensure_stamped(report, user, db)
+
     # Re-run the deterministic pipeline on detail reads. Besides keeping the
     # result current when the NLP rules improve, this also upgrades old stored
     # OCR rewrites that exposed the whole noisy page as a "summary".
     was_simplified = bool(report.simplified_text)
     result: SimplifyResult = simplify_text(report.original_text)
 
-    report.simplified_text = result.simplified_text
-    report.processed_at = utc_now()
-    db.commit()
+    if report.simplified_text != result.simplified_text:
+        report.simplified_text = result.simplified_text
+        report.processed_at = utc_now()
+        stamped = True
+    if stamped:
+        db.commit()
 
     return {
         "id": report.id,
@@ -371,17 +445,13 @@ def simplify_report(
         "terms_simplified": result.terms_simplified,
         "sentence_count": result.sentence_count,
         "note": "Previously simplified." if was_simplified else result.note,
+        **_report_status_fields(report),
     }
 
 
 @app.get("/reports")
 def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
-    """List the signed-in user's reports, newest first.
-
-    Selects only the summary columns. Loading whole rows pulled every report's
-    OCR text and simplified text (a few KB each) across the wire just to answer
-    "is there a simplified version?".
-    """
+    """List stored summary fields; fetch OCR text only to repair stale parsers."""
     rows = (
         db.query(
             Report.id,
@@ -393,13 +463,18 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
             Report.derived_title,
             Report.report_date,
             Report.report_date_source,
-            Report.original_text,
+            Report.attention_count,
+            Report.values_read,
+            Report.values_expected,
+            Report.parse_note,
+            Report.parser_version,
         )
         .filter(Report.user_id == user.id)
         .order_by(Report.uploaded_at.desc())
         .all()
     )
     listed: list[dict[str, object]] = []
+    stale_ids: list[int] = []
     for (
         report_id,
         uploaded_at,
@@ -410,15 +485,18 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
         derived_title,
         report_date,
         report_date_source,
-        original_text,
+        attention_count,
+        values_read,
+        values_expected,
+        parse_note,
+        parser_version,
     ) in rows:
-        current_summary = summarise_report(
-            original_text or "",
-            getattr(user, "sex_at_birth", None) or getattr(user, "sex", None),
-        )
-        panel = derived_title or current_summary["title"]
+        panel = derived_title
+        if (parser_version or 0) < PARSER_VERSION:
+            stale_ids.append(report_id)
         has_report_date = report_date_source == "report" and report_date is not None
         day = report_date if has_report_date else (uploaded_at.date() if uploaded_at else None)
+        status_code, status_text = report_status(values_read, attention_count, parse_note, simplified_length > 0)
         listed.append(
             {
                 "id": report_id,
@@ -430,12 +508,34 @@ def list_reports(user: CurrentUser, db: DbSession) -> list[dict[str, object]]:
                 "confidence": confidence,
                 "has_simplified": simplified_length > 0,
                 "image_path": image_path,
-                "attention_count": current_summary["attention_count"],
-                "values_read": current_summary["values_read"],
-                "values_expected": current_summary["values_expected"],
-                "parse_note": current_summary["parse_note"],
+                "attention_count": attention_count,
+                "values_read": values_read,
+                "values_expected": values_expected,
+                "parse_note": parse_note,
+                "status_code": status_code,
+                "status_text": status_text,
             }
         )
+    if stale_ids:
+        stale = db.query(Report).filter(Report.id.in_(stale_ids), Report.user_id == user.id).all()
+        changed = False
+        for report in stale:
+            changed = ensure_stamped(report, user, db) or changed
+        if changed:
+            db.commit()
+        by_id = {report.id: report for report in stale}
+        for item in listed:
+            report = by_id.get(item["id"])
+            if report is not None:
+                item.update({
+                    "title": report.title or report.derived_title,
+                    "derived_title": report.derived_title,
+                    "attention_count": report.attention_count,
+                    "values_read": report.values_read,
+                    "values_expected": report.values_expected,
+                    "parse_note": report.parse_note,
+                    **_report_status_fields(report),
+                })
     return listed
 
 
@@ -483,6 +583,7 @@ def _stamp_report(report: Report, user: User) -> None:
     report.values_read = int(summary["values_read"])
     report.values_expected = int(summary["values_expected"])
     report.parse_note = summary["parse_note"]  # type: ignore[assignment]
+    report.parser_version = PARSER_VERSION
 
 
 @app.get("/profile")

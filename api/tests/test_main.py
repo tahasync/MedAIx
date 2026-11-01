@@ -12,7 +12,7 @@ import pytest
 from fastapi import Depends, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import Session
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_medaix.db")
@@ -104,6 +104,28 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "paths" in response.json()
+
+
+def test_cors_origins_default_empty_and_comma_separated() -> None:
+    assert main_module.parse_cors_origins("") == []
+    assert main_module.parse_cors_origins(" https://a.example,https://b.example ") == [
+        "https://a.example",
+        "https://b.example",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ((None, None, None, False), ("not_explained", "Not explained yet")),
+        ((0, 0, None, True), ("no_values", "No values checked")),
+        ((4, 2, None, True), ("attention", "2 need attention")),
+        ((4, 0, "We read 4 of 9 values", True), ("partial", "Checked 4 of 9 values")),
+        ((4, 0, None, True), ("in_range", "All read values in range")),
+    ],
+)
+def test_report_status_copy(args, expected) -> None:
+    assert main_module.report_status(*args) == expected
 
 
 def test_sqlite_on_disk_triggers_ephemeral_warning(
@@ -270,6 +292,22 @@ def test_upload_report_retry_with_same_client_id_returns_saved_report(
     ) == 1
 
 
+def test_upload_report_duplicate_content_returns_existing_id(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text_value = f"Haemoglobin 14.1 g/dL {uuid4().hex}"
+
+    def fake_extract(image: Image.Image, *, language):
+        return main_module.OcrResult(text=text_value, confidence=88.0, width=image.width,
+            height=image.height, skew_degrees=0.0)
+
+    monkeypatch.setattr(main_module, "extract_text", fake_extract)
+    first = client.post("/upload-report", files={"file": ("one.png", _lab_report_image(), "image/png")}).json()
+    second = client.post("/upload-report", files={"file": ("two.png", _lab_report_image(), "image/png")}).json()
+    assert second["id"] == first["id"]
+    assert second["duplicate"] is True
+
+
 def test_upload_report_defaults_to_english(client: TestClient) -> None:
     response = client.post(
         "/upload-report",
@@ -364,7 +402,17 @@ def test_upload_report_rejects_blank_image(client: TestClient) -> None:
 
 def test_upload_report_corrects_skew(client: TestClient) -> None:
     """Given a rotated photo, when uploaded, then the skew is detected and fixed."""
-    image = Image.open(io.BytesIO(_lab_report_image())).convert("L")
+    image = Image.open(
+        io.BytesIO(
+            _lab_report_image(
+                [
+                    "COMPLETE BLOOD COUNT UNIQUE SKEW",
+                    "Haemoglobin 14.2 g/dL 12.0 - 16.0",
+                    "Platelets 247 10*9/L 150 - 400",
+                ]
+            )
+        )
+    ).convert("L")
     rotated = image.rotate(3.0, resample=Image.BICUBIC, expand=True, fillcolor=255)
     buffer = io.BytesIO()
     rotated.save(buffer, format="PNG")
@@ -714,7 +762,7 @@ def test_simplify_report_refreshes_an_old_stored_rewrite() -> None:
         result = main_module.simplify_report(
             user,
             session,
-            {"report_id": report.id},
+            main_module.SimplifyReportInput(report_id=report.id),
         )
         assert result["note"] == "Previously simplified."
         assert "Readable entries from the scan" in result["simplified_text"]
@@ -777,8 +825,14 @@ def test_simplify_report_invalid_id_returns_422(client: TestClient) -> None:
 
 def test_list_reports_returns_newest_first(client: TestClient) -> None:
     """GET /reports lists stored reports newest first."""
-    client.post("/upload-report", files={"file": ("a.png", _lab_report_image(), "image/png")})
-    client.post("/upload-report", files={"file": ("b.png", _lab_report_image(), "image/png")})
+    first = _lab_report_image(
+        ["COMPLETE BLOOD COUNT", "Haemoglobin 14.2 g/dL 12.0 - 16.0"]
+    )
+    second = _lab_report_image(
+        ["COMPLETE BLOOD COUNT", "Haemoglobin 13.9 g/dL 12.0 - 16.0"]
+    )
+    client.post("/upload-report", files={"file": ("a.png", first, "image/png")})
+    client.post("/upload-report", files={"file": ("b.png", second, "image/png")})
 
     response = client.get("/reports")
 
@@ -1351,6 +1405,8 @@ def test_risk_trends_flags_a_rising_hba1c_streak(client: TestClient) -> None:
     assert haemoglobin["range"] == {
         "low": 12.0,
         "high": 15.5,
+        "raw_low": "12.0",
+        "raw_high": "15.5",
         "label": "Normal range 12.0–15.5 g/dL",
         "source": "default",
     }
@@ -1425,6 +1481,46 @@ def test_patient_can_rename_a_report(client: TestClient) -> None:
     assert renamed.json()["title"] == "My CBC"
     assert listed["title"] == "My CBC"
     assert listed["derived_title"] == "Complete blood count"
+
+
+def test_stale_parser_version_repairs_a_stored_title() -> None:
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.supabase_uid == "test-user").one_or_none()
+        if user is None:
+            user = User(supabase_uid="test-user")
+            session.add(user)
+            session.flush()
+        report = Report(user_id=user.id, original_text="URINE ROUTINE\nBile Salts Present",
+            derived_title="Liver function test", parser_version=1)
+        session.add(report)
+        session.commit()
+        rows = main_module.list_reports(user, session)
+        assert next(row for row in rows if row["id"] == report.id)["derived_title"] == "Urine test"
+        assert report.parser_version == main_module.PARSER_VERSION
+    finally:
+        session.close()
+
+
+def test_report_list_query_does_not_select_original_text() -> None:
+    session = SessionLocal()
+    statements: list[str] = []
+    try:
+        user = User(supabase_uid=f"summary-{uuid4().hex}")
+        session.add(user)
+        session.commit()
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+            if "from reports" in statement.lower():
+                statements.append(statement.lower())
+
+        event.listen(session.get_bind(), "before_cursor_execute", capture)
+        main_module.list_reports(user, session)
+        event.remove(session.get_bind(), "before_cursor_execute", capture)
+        assert statements
+        assert all("original_text" not in statement for statement in statements)
+    finally:
+        session.close()
 
 
 def test_sign_in_copies_email_from_the_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

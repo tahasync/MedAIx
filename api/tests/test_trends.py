@@ -117,13 +117,14 @@ Eosinophils 01 - 06 % 02"""
         (4.0, 11.0),
         (4.0, 5.5),
     ]
-    assert parsed[1].unit == "x10^3/uL"
+    assert parsed[1].unit == "×10³/µL"
+    assert parsed[1].unit_corrected is True
 
     flagged = parse_lab_values(
         "Haemoglobin 11.5 - 16.0 g/dl1 10.5\n"
         "WBC 4 - 11 x10^3/uLt 13.0"
     )
-    assert [row.unit for row in flagged] == ["g/dl", "x10^3/uL"]
+    assert [row.unit for row in flagged] == ["g/dL", "×10³/µL"]
 
 
 def test_parser_does_not_treat_range_first_bounds_as_a_result_when_result_is_missing() -> None:
@@ -175,7 +176,7 @@ def test_parser_tolerates_ocr_noise() -> None:
         "Sodium",
     ]
     assert [row.value for row in parsed] == [14.2, 245.0, 5.9, 350.0, 140.0]
-    assert parsed[1].unit == "10*9/L"
+    assert parsed[1].unit == "×10³/µL"
     assert (parsed[3].low, parsed[3].high) == (200.0, 900.0)
 
 
@@ -248,6 +249,33 @@ def test_summary_counts_qualitative_rows_but_trends_remain_numeric_only() -> Non
     assert summary["values_expected"] == 2
     assert summary["parse_note"] is None
     assert build_risk_trends(_user(), [_report(1, 1, text)]) ["trends"] == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Report Date: 14-Sep-26", date(2026, 9, 14)),
+        ("Sample Date 14 Sep 69", date(2069, 9, 14)),
+        ("Report Date: 14-Sep-70", date(1970, 9, 14)),
+        ("14-Sep-26", None),
+    ],
+)
+def test_report_dates_accept_labelled_two_digit_years_only(text, expected) -> None:
+    assert extract_report_date(text) == expected
+
+
+def test_panel_title_uses_whole_words_and_prioritizes_urine() -> None:
+    assert guess_panel_title("Urine: Bile Salts and Yeast Cells") == "Urine test"
+    assert guess_panel_title("Bile salts and Yeast cells") != "Liver function test"
+    assert guess_panel_title("ALT 10, AST 12, Bilirubin 0.5") == "Liver function test"
+
+
+def test_duplicate_same_day_observations_do_not_create_direction() -> None:
+    report_a = _report(1, 1, "Haemoglobin 10.5 g/dL 11.5 - 16.0")
+    report_b = _report(2, 1, "Haemoglobin 10.5 g/dL 11.5 - 16.0")
+    trend = _trend(build_risk_trends(_user(), [report_a, report_b]), "Haemoglobin")
+    assert len(trend["points"]) == 1
+    assert trend["direction"] is None
 
 
 def test_parser_ignores_result_heading_with_malformed_ocr_date() -> None:
@@ -423,6 +451,8 @@ def test_report_range_wins_over_default() -> None:
     assert trend["range"] == {
         "low": 4.0,
         "high": 5.6,
+        "raw_low": "4.0",
+        "raw_high": "5.6",
         "label": "Normal range 4.0–5.6 %",
         "source": "report",
     }
@@ -437,6 +467,8 @@ def test_default_range_label_and_source() -> None:
     assert trend["range"] == {
         "low": 4.0,
         "high": 6.0,
+        "raw_low": "4.0",
+        "raw_high": "6.0",
         "label": "Normal range 4.0–6.0 %",
         "source": "default",
     }
@@ -617,7 +649,7 @@ def test_out_of_range_alert_when_already_outside() -> None:
     assert result["insight"] == {
         "marker": "LDL",
         "title": "Your LDL is outside its normal range",
-        "body": "LDL is outside its normal range in your latest report.",
+        "body": "128 mg/dL on 2 Feb. Your report's range is 0–100. Worth raising with your doctor.",
     }
 
 
@@ -639,7 +671,7 @@ def test_single_point_markers_never_alert() -> None:
     assert len(hba1c["points"]) == 1
     assert hba1c["points"][0]["status"] == "error"
     assert hba1c["alert"] is None
-    assert hba1c["direction"] == "stable"
+    assert hba1c["direction"] is None
     assert result["insight"] is None
 
 
