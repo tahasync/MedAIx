@@ -1,18 +1,20 @@
-name: App Build Sprint 5
+name: App Build Debug
 
 on:
-  push:
-    paths:
-      - 'app/**'
-      - '.github/workflows/app-build-sprint.yml'
+  workflow_dispatch:
+    inputs:
+      sprint:
+        description: Sprint number for the debug build
+        type: number
+        default: 5
+        required: true
   pull_request:
     paths:
       - 'app/**'
       - '.github/workflows/app-build-sprint.yml'
-  workflow_dispatch:
 
 concurrency:
-  group: app-build-sprint-${{ github.ref }}
+  group: app-build-debug-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -36,7 +38,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
+          flutter-version: ${{ vars.FLUTTER_VERSION || '3.44.9' }}
           channel: stable
           cache: true
 
@@ -52,8 +54,8 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses
 
-      - name: Build debug APK with Sprint 5 flag
-        run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=5
+      - name: Build debug APK
+        run: flutter build apk --debug --dart-define=MEDAIX_SPRINT=${{ inputs.sprint || 5 }}
 
       - name: Verify APK exists
         run: |
@@ -64,6 +66,6 @@ jobs:
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-sprint5.apk
+          name: app-debug-sprint${{ inputs.sprint || 5 }}.apk
           path: app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7

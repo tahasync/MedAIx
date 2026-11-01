@@ -21,8 +21,8 @@ jobs:
           HEALTH_URL: ${{ vars.API_HEALTH_URL }}
         run: |
           if [ -z "$HEALTH_URL" ]; then
-            echo "API_HEALTH_URL repository variable is not set — nothing to ping."
-            exit 0
+            echo "::error::API_HEALTH_URL repository variable is not set."
+            exit 1
           fi
           for attempt in 1 2 3; do
             if curl -fsSL --max-time 30 "$HEALTH_URL"; then

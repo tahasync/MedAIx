@@ -6,8 +6,6 @@ on:
       - main
     tags:
       - 'v*'
-      - 'Sprint-3-Wk-5-6-Risk-Trend-Analysis-EP-02-PB-03-US-03'
-      - 'Sprint-4-Wk-7-8-Wellness-Tracking-UI-EP-06-PB-07-08-09'
     paths:
       - 'app/**'
       - '.github/workflows/app-build.yml'
@@ -43,7 +41,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
+          flutter-version: ${{ vars.FLUTTER_VERSION || '3.44.9' }}
           channel: stable
           cache: true
 
