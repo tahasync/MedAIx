@@ -93,7 +93,8 @@ cues are rate limited to one every 60 ms.
 | User event | Cue | Where it fires |
 | --- | --- | --- |
 | Primary button press | `tap` (light) | `PrimaryButton` |
-| Tab, chip, segmented/list-row selection | `select` | Shared selection widgets |
+| Tab change | `tap` (light impact) | `FloatingNav`; fires when the active tab changes |
+| Chip, segmented/list-row selection | `select` | Shared selection widgets |
 | Switch change | `toggle` (selection click) | `AppSwitch` |
 | Pull-to-refresh trigger | `refresh` (light) | `AppScreen` |
 | Report uploaded, profile saved, wellness entry logged | `success` (medium) | Feature controller/result |

@@ -166,6 +166,55 @@ void main() {
         expect(find.text('High'), findsOneWidget);
       },
     );
+
+    testWidgets('changing navigation tabs emits a light impact cue', (
+      tester,
+    ) async {
+      final List<MethodCall> calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'HapticFeedback.vibrate') calls.add(call);
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ...fakeOverrides(),
+            appHapticsProvider.overrideWithValue(AppHaptics()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomCenter,
+                child: FloatingNav(
+                  items: const <NavItem>[
+                    NavItem(icon: Icons.home, label: 'Home'),
+                    NavItem(icon: Icons.description, label: 'Reports'),
+                  ],
+                  selectedIndex: 0,
+                  onSelected: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reports'));
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 65)),
+      );
+
+      expect(calls, hasLength(1));
+      expect(calls.single.arguments, 'HapticFeedbackType.lightImpact');
+    });
   });
 
   testWidgets('reduced motion keeps skeletons static and durations at zero', (

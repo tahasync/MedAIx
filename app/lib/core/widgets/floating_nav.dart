@@ -112,7 +112,9 @@ class _NavButton extends StatelessWidget {
             borderRadius: AppRadius.navItemAll,
             onTap: () {
               if (!selected) {
-                playHaptic(context, (haptics) => haptics.select());
+                // Android maps selectionClick to a very subtle text-handle
+                // feedback; light impact makes a tab change perceptible.
+                playHaptic(context, (haptics) => haptics.tap());
               }
               onTap();
             },

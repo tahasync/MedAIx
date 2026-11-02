@@ -56,14 +56,26 @@ class TrendChart extends StatelessWidget {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 42,
+              reservedSize: 52,
               interval: maxY - minY,
-              getTitlesWidget: (value, meta) => Text(
-                formatTrendValue(value),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.muted),
-              ),
+              getTitlesWidget: (value, meta) {
+                // fl_chart aligns interval ticks to zero and also adds both
+                // data bounds. That can put an interior tick right beside
+                // the maximum on narrow phone charts. Keep only the bounds.
+                final double tolerance = (meta.max - meta.min).abs() * 1e-9;
+                final bool atMin = (value - meta.min).abs() <= tolerance;
+                final bool atMax = (value - meta.max).abs() <= tolerance;
+                if (!atMin && !atMax) return const SizedBox.shrink();
+                return Text(
+                  _formatAxisValue(value),
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: c.muted),
+                );
+              },
             ),
           ),
           rightTitles: const AxisTitles(
@@ -255,3 +267,8 @@ String _monthAbbreviation(int month) => const <String>[
 String formatTrendValue(double value) => value == value.roundToDouble()
     ? value.toStringAsFixed(0)
     : value.toString();
+
+String _formatAxisValue(double value) {
+  final double rounded = double.tryParse(value.toStringAsPrecision(4)) ?? value;
+  return formatTrendValue(rounded);
+}
