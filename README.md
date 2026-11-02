@@ -10,15 +10,17 @@ sharing are not part of this release.
 > **Current milestone: Sprint 5 (Wk 9–10) — Integration Pass 1.** See
 > [`docs/roadmap.md`](docs/roadmap.md) for scope, checks, and limitations.
 >
-> **Android release:** `0.1.3+4` — GitHub release tag `v0.1.3`.
+> **Android version:** `0.1.6+7` — release tag `v0.1.6`.
+> This release makes tab changes more perceptible and prevents trend-chart axis
+> labels from colliding on Android. See [`release-notes/v0.1.6.md`](release-notes/v0.1.6.md).
 
 ## Live
 
 | | |
 |---|---|
 | API | <https://medaix.onrender.com> |
-| Health | <https://medaix.onrender.com/health> → `{"status":"ok","database":"postgres"}` |
-| Swagger | <https://medaix.onrender.com/docs> |
+| Health | <https://medaix.onrender.com/health> — reports the active `postgres` or `sqlite` backend |
+| API docs | `/docs` and `/openapi.json` are disabled when `ENV=production`; available in other environments |
 
 The `database` field reports which backend is actually serving requests —
 `postgres` or `sqlite`. A `sqlite` value means the deploy is writing to an
@@ -31,7 +33,7 @@ ephemeral disk and data will be lost on restart.
 | Frontend | Flutter + Riverpod |
 | Backend | FastAPI + SQLAlchemy |
 | Auth | Supabase Auth (Google + email); API verifies the JWT against the project JWKS |
-| Database | Neon Postgres (pooled) |
+| Database | Neon Postgres (pooled) when configured; SQLite is the local fallback |
 | Hosting | Render free web service |
 | CI/CD | GitHub Actions |
 
@@ -48,8 +50,8 @@ Zero paid infrastructure.
 │   └── color-system.md  locked brand palette + semantic states
 ├── release-notes/       versioned notes shown in the app update dialog
 └── .github/workflows/
-    ├── api-deploy.yml   on api/**  — tests, Render deploy hook, then health check
-    ├── app-build.yml    on app/** or v* tags — version-checks, signs, and releases the APK
+    ├── api-deploy.yml   on api/**  — tests, main-only Render deploy, then health check
+    ├── app-build.yml    on app/** on main or v* tags — tests and signs APKs; tags publish releases
     ├── app-build-sprint.yml — validates app/** and builds the Sprint 5 debug APK artifact
     └── keep-alive.yml   cron */10  — keeps the free instance awake
 ```
@@ -116,10 +118,18 @@ run talks to the same Neon database as production.
 
 ## Deployment
 
-Pushing API changes to `main` runs the API test suite and triggers the Render
-deploy hook. Pushing an app change or a `v*` tag runs the app release workflow;
-the Sprint 5 workflow builds a debug APK artifact. Creating a local tag does
-not publish it or start a GitHub Actions run.
+Pushing changes under `api/` to any branch or opening a matching pull request
+runs `uv run pytest -q`. A push to `main` runs the same gate, calls the Render
+deploy hook, and checks `/health`; a manual run deploys only when its ref is
+`main`. The workflow fails if the deploy-hook secret is missing or the health
+check does not pass.
+
+Pushing app changes to `main` runs Flutter analyze and tests, then uploads a
+signed APK artifact. Pushing a version tag that matches `app/pubspec.yaml`
+(for example, `v0.1.6` for `0.1.6+7`) runs the same gates, verifies the APK
+signature, and publishes the APK with the matching release notes. Tag builds
+use repository secrets; never commit signing files or client keys. The Sprint
+workflow builds a debug APK artifact for demos.
 
 | Secret | Purpose |
 |---|---|
@@ -162,4 +172,5 @@ built — there is no separate QA pass.
 
 - [`docs/roadmap.md`](docs/roadmap.md) — 32-week solo execution plan
 - [`docs/color-system.md`](docs/color-system.md) — brand palette + semantic states
+- [`docs/design-system.md`](docs/design-system.md) — Flutter components, motion, and haptic conventions
 - [`api/README.md`](api/README.md) — backend specifics and Neon/Render setup
