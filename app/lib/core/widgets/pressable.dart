@@ -1,15 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../theme/app_theme.dart';
 
-/// Haptic cues for primary actions and selections.
-abstract final class AppHaptics {
-  static void primary() => HapticFeedback.lightImpact();
-  static void select() => HapticFeedback.selectionClick();
-  static void success() => HapticFeedback.mediumImpact();
-  static void error() => HapticFeedback.heavyImpact();
-}
+export '../haptics.dart';
 
 /// Scales its child to 98 % while pressed. Layout bounds do not change, so
 /// neighbours never jitter. Honours reduced motion.

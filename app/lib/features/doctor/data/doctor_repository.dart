@@ -1,3 +1,4 @@
+/// Sprint 11 feature — dormant until `FeatureFlags.doctorMatch`.
 /// Symptom → specialist matching (fake-only for now).
 library;
 

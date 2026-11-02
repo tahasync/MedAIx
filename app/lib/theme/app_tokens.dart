@@ -65,9 +65,6 @@ abstract final class AppRadius {
     Radius.circular(button),
   );
   static const BorderRadius chipAll = BorderRadius.all(Radius.circular(chip));
-  static const BorderRadius iconTileAll = BorderRadius.all(
-    Radius.circular(iconTile),
-  );
   static const BorderRadius navAll = BorderRadius.all(Radius.circular(nav));
   static const BorderRadius navItemAll = BorderRadius.all(
     Radius.circular(navItem),
@@ -81,9 +78,6 @@ abstract final class AppRadius {
   );
   static const BorderRadius toastAll = BorderRadius.all(Radius.circular(toast));
   static const BorderRadius qrAll = BorderRadius.all(Radius.circular(qr));
-  static const BorderRadius emptyIconAll = BorderRadius.all(
-    Radius.circular(emptyIcon),
-  );
   static const BorderRadius viewfinderAll = BorderRadius.all(
     Radius.circular(viewfinder),
   );
@@ -107,7 +101,6 @@ abstract final class AppSize {
 
   /// Floating bottom nav.
   static const double navHeight = 64;
-  static const double navItemHeight = 52;
   static const double navItemWidth = 56;
 
   /// Active indicator: a stadium behind the icon, label beneath it.
@@ -155,9 +148,6 @@ abstract final class AppSize {
   static const double iconTiny = 14;
   static const double iconTileLarge = 22;
   static const double statusIcon = 15;
-
-  /// Minimum layout width the UI must survive without overflow.
-  static const double minWidth = 320;
 }
 
 /// Motion: 150–250 ms, ease-out. Durations are read through [of] so
@@ -167,6 +157,8 @@ abstract final class AppMotion {
   static const Duration normal = Duration(milliseconds: 200);
   static const Duration slow = Duration(milliseconds: 250);
   static const Duration shimmer = Duration(milliseconds: 1300);
+  static const Duration scanSweep = Duration(seconds: 2);
+  static const Duration splashMinimum = Duration(milliseconds: 1400);
   static const Duration toast = Duration(milliseconds: 1800);
 
   static const Curve curve = Curves.easeOut;
@@ -211,7 +203,6 @@ abstract final class AppType {
   static const double navLabelSize = 11;
   static const FontWeight navLabelWeight = FontWeight.w500;
 
-  static const double statusSize = 13;
   static const FontWeight statusWeight = FontWeight.w600;
 }
 

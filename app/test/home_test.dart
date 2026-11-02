@@ -29,10 +29,13 @@ void main() {
     await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
-    expect(find.byType(AiInsightCard), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('home-insight-tile')),
+      findsOneWidget,
+    );
     expect(find.text('Automated insight'), findsOneWidget);
     expect(find.text('Sample HbA1c trend'), findsOneWidget);
-    expect(find.text('See the trend'), findsOneWidget);
+    expect(find.text('See HbA1c trend'), findsOneWidget);
   });
 
   testWidgets('does not invent a trend when there are fewer than two reports', (
@@ -50,24 +53,25 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(AiInsightCard), findsNothing);
+    expect(find.text('Automated insight'), findsNothing);
     expect(find.text('Upload one more report to see trends'), findsOneWidget);
   });
 
-  testWidgets('offers the four quick actions', (tester) async {
+  testWidgets('shows report and trend actions in the bento grid', (
+    tester,
+  ) async {
     await usePhone(tester);
     await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
-    expect(find.byType(TileButton), findsNWidgets(4));
-    for (final label in [
-      'Upload report',
-      'Check medicines',
-      'Scan medicine',
-      'Find a doctor',
-    ]) {
-      expect(find.widgetWithText(TileButton, label), findsOneWidget);
-    }
+    expect(find.byType(BentoGrid), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('add-report-tile')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey<String>('trends-tile')), findsOneWidget);
+    expect(find.text('Add a report'), findsOneWidget);
+    expect(find.text('See my trends'), findsOneWidget);
   });
 
   testWidgets('habit card shows its score, progress and next step', (
@@ -100,9 +104,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Latest report'), findsOneWidget);
-    expect(find.byType(SummaryRow), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('latest-report-tile')),
+      findsOneWidget,
+    );
     expect(find.textContaining('Blood test'), findsOneWidget);
-    expect(find.text('2 values need attention'), findsNothing);
     expect(find.text('2 need attention'), findsOneWidget);
   });
 
@@ -118,12 +124,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('In plain words'), findsOneWidget);
     // The fake report title appears in the header subtitle with its date.
-    expect(find.text('18 Oct 2026 · Blood test'), findsOneWidget);
+    expect(find.text('Blood test · 18 Oct 2026'), findsOneWidget);
   });
 
-  testWidgets('with no reports the latest section is an empty state', (
-    tester,
-  ) async {
+  testWidgets('with no reports shows only the first-run hero', (tester) async {
     await usePhone(tester);
     await tester.pumpWidget(
       testApp(
@@ -138,11 +142,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.byType(BentoGrid), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('first-run-hero')),
+      findsOneWidget,
+    );
+    expect(find.text('Add your first report'), findsOneWidget);
+    expect(find.text('Add a report'), findsOneWidget);
+    expect(find.text('See my trends'), findsNothing);
+    expect(find.text('Latest report'), findsNothing);
     expect(find.byType(SummaryRow), findsNothing);
-    expect(find.byType(EmptyState), findsOneWidget);
-    expect(find.text('No reports yet'), findsOneWidget);
-    // Tile label plus the empty state's button.
-    expect(find.text('Upload report'), findsNWidgets(2));
   });
 
   testWidgets('no overflow at 320 dp with 200 % text', (tester) async {

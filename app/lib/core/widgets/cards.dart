@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../theme/app_theme.dart';
 import '../../theme/ai_surface.dart';
+import '../../theme/app_theme.dart';
 import 'app_card.dart';
 import 'buttons.dart';
 
@@ -45,6 +45,10 @@ class AiInsightCard extends StatelessWidget {
                 onPressed: () => showModalBottomSheet<void>(
                   context: context,
                   useSafeArea: true,
+                  sheetAnimationStyle: AnimationStyle(
+                    duration: AppMotion.of(context, AppMotion.normal),
+                    reverseDuration: AppMotion.of(context, AppMotion.normal),
+                  ),
                   builder: (context) => Padding(
                     padding: const EdgeInsets.all(AppSpace.card),
                     child: Column(

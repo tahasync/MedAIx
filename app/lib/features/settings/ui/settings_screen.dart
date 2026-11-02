@@ -1,12 +1,15 @@
 /// "More" tab (mockup `settings`): preferences, records, account, help.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/features.dart';
 import '../../../core/router.dart';
+import '../../../core/update_checker.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
 import '../../auth/providers/auth_providers.dart';
@@ -55,8 +58,12 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeMode mode = ref.watch(themeModeProvider);
     final ThemeModeController theme = ref.read(themeModeProvider.notifier);
+    final AsyncValue<bool> hapticsEnabled = ref.watch(hapticsEnabledProvider);
+    final HapticsController haptics = ref.read(hapticsEnabledProvider.notifier);
     final bool followSystem = mode == ThemeMode.system;
     final FeatureFlags features = ref.watch(featuresProvider);
+    final String appVersion =
+        ref.watch(installedVersionProvider).valueOrNull?.label ?? 'v0.1.4+5';
     final bool effectiveDark =
         mode == ThemeMode.dark ||
         (followSystem &&
@@ -91,6 +98,15 @@ class SettingsScreen extends ConsumerWidget {
                     onChanged: (on) => on
                         ? theme.setMode(ThemeMode.system)
                         : theme.setDark(effectiveDark),
+                  ),
+                ),
+                ListRow(
+                  title: 'Haptic feedback',
+                  trailing: AppSwitch(
+                    value: hapticsEnabled.valueOrNull ?? true,
+                    label: 'Haptic feedback',
+                    onChanged: (enabled) =>
+                        unawaited(haptics.setEnabled(enabled)),
                   ),
                 ),
               ],
@@ -161,12 +177,39 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 ListRow(
                   title: 'Contact support',
-                  onTap: () => showInfoSheet(
-                    context,
-                    title: 'Contact support',
-                    paragraphs: _support,
-                  ),
+                  onTap: () => context.go(AppRoutes.support),
                 ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpace.xxl),
+            child: Column(
+              children: [
+                Text(
+                  'MedAIx $appVersion',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
+                ),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  children: [
+                    _FooterLink(
+                      label: 'Terms',
+                      onPressed: () => context.go(AppRoutes.terms),
+                    ),
+                    _FooterLink(
+                      label: 'Privacy',
+                      onPressed: () => context.go(AppRoutes.privacy),
+                    ),
+                    _FooterLink(
+                      label: 'Support',
+                      onPressed: () => context.go(AppRoutes.support),
+                    ),
+                  ],
+                ),
+                const AppDisclaimer(),
               ],
             ),
           ),
@@ -201,12 +244,19 @@ List<String> _troubleshooting(FeatureFlags features) => <String>[
     'Reminders are stored and delivered on this device only.',
 ];
 
-const List<String> _support = <String>[
-  'Email synctaha@gmail.com with a short description of what happened. '
-      'Please don’t include report photos in the email.',
-  'We reply within two working days. For anything urgent about your health, '
-      'contact your doctor or local emergency services.',
-];
+class _FooterLink extends StatelessWidget {
+  const _FooterLink({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton(
+    onPressed: onPressed,
+    style: TextButton.styleFrom(foregroundColor: context.colors.muted),
+    child: Text(label),
+  );
+}
 
 /// Bottom sheet with a title, one line of context and a confirm / cancel
 /// pair. Returns true when confirmed.
@@ -222,6 +272,10 @@ Future<bool> showConfirmSheet(
     context: context,
     useRootNavigator: true,
     useSafeArea: true,
+    sheetAnimationStyle: AnimationStyle(
+      duration: AppMotion.of(context, AppMotion.normal),
+      reverseDuration: AppMotion.of(context, AppMotion.normal),
+    ),
     builder: (context) => _SheetFrame(
       title: title,
       children: [
@@ -235,12 +289,19 @@ Future<bool> showConfirmSheet(
         if (destructive)
           _DangerButton(
             label: confirmLabel,
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () {
+              playHaptic(context, (haptics) => haptics.confirm());
+              Navigator.of(context).pop(true);
+            },
           )
         else
           PrimaryButton(
             label: confirmLabel,
-            onPressed: () => Navigator.of(context).pop(true),
+            haptic: false,
+            onPressed: () {
+              playHaptic(context, (haptics) => haptics.confirm());
+              Navigator.of(context).pop(true);
+            },
           ),
         const SizedBox(height: AppSpace.xs),
         LinkButton(
@@ -264,6 +325,10 @@ Future<void> showInfoSheet(
     useRootNavigator: true,
     useSafeArea: true,
     isScrollControlled: true,
+    sheetAnimationStyle: AnimationStyle(
+      duration: AppMotion.of(context, AppMotion.normal),
+      reverseDuration: AppMotion.of(context, AppMotion.normal),
+    ),
     builder: (context) => _SheetFrame(
       title: title,
       scrollable: true,
@@ -274,7 +339,7 @@ Future<void> showInfoSheet(
         ],
         const SizedBox(height: AppSpace.xl),
         GhostButton(
-          label: 'Close',
+          label: 'Got it',
           onPressed: () => Navigator.of(context).pop(),
         ),
       ],

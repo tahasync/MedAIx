@@ -70,7 +70,7 @@ class TileButton extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: () {
-              AppHaptics.select();
+              playHaptic(context, (haptics) => haptics.select());
               onTap();
             },
             child: ConstrainedBox(
@@ -202,7 +202,7 @@ class ListRow extends StatelessWidget {
     if (onTap != null) {
       row = InkWell(
         onTap: () {
-          AppHaptics.select();
+          playHaptic(context, (haptics) => haptics.select());
           onTap!();
         },
         child: ConstrainedBox(

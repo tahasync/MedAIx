@@ -4,6 +4,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/brand/brand.dart';
@@ -20,8 +21,11 @@ class GalleryScreen extends StatelessWidget {
     _Section('Inputs', _inputsSection),
     _Section('Cards', _cardsSection),
     _Section('Tiles and rows', _tilesSection),
+    _Section('Bento layout', _bentoSection),
     _Section('Feedback', _feedbackSection),
+    _Section('Status and disclaimer', _statusSection),
     _Section('Empty and error states', _statesSection),
+    _Section('Recovery states', _recoverySection),
     _Section('Nav', _navSection),
   ];
 
@@ -178,6 +182,10 @@ Widget _buttonsSection(BuildContext context) {
     children: [
       PrimaryButton(label: 'Primary', onPressed: () {}),
       _gap(AppSpace.md),
+      const Text('Default action'),
+      _gap(AppSpace.md),
+      const _PressPreviewButton(),
+      _gap(AppSpace.md),
       PrimaryButton(
         label: 'Primary with icon',
         icon: LucideIcons.upload,
@@ -187,6 +195,20 @@ Widget _buttonsSection(BuildContext context) {
       PrimaryButton(label: 'Saving', loading: true, onPressed: () {}),
       _gap(AppSpace.md),
       const PrimaryButton(label: 'Disabled', onPressed: null),
+      const SizedBox(height: AppSpace.xs),
+      Text(
+        'Add your email to continue.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
+      ),
+      _gap(AppSpace.md),
+      const PrimaryButton(
+        label: 'Saved',
+        icon: LucideIcons.check,
+        onPressed: null,
+      ),
+      _gap(AppSpace.md),
       _gap(AppSpace.md),
       GhostButton(label: 'Ghost', icon: LucideIcons.camera, onPressed: () {}),
       _gap(AppSpace.md),
@@ -225,6 +247,23 @@ Widget _buttonsSection(BuildContext context) {
         ],
       ),
     ],
+  );
+}
+
+class _PressPreviewButton extends StatefulWidget {
+  const _PressPreviewButton();
+
+  @override
+  State<_PressPreviewButton> createState() => _PressPreviewButtonState();
+}
+
+class _PressPreviewButtonState extends State<_PressPreviewButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) => PrimaryButton(
+    label: _pressed ? 'Pressed' : 'Press to preview',
+    onPressed: () => setState(() => _pressed = !_pressed),
   );
 }
 
@@ -385,7 +424,7 @@ Widget _cardsSection(BuildContext context) {
       AiInsightCard(
         title: 'Your HbA1c has risen across 3 reports',
         body: '5.9 in March to 6.4 now. Worth raising with your doctor.',
-        actionLabel: 'See the trend',
+        actionLabel: 'See HbA1c trend',
         onAction: () {},
       ),
       _gap(AppSpace.cardGap),
@@ -434,7 +473,7 @@ Widget _tilesSection(BuildContext context) {
               Expanded(
                 child: TileButton(
                   icon: LucideIcons.upload,
-                  label: 'Upload report',
+                  label: 'Add a report',
                   onTap: () {},
                 ),
               ),
@@ -496,6 +535,49 @@ Widget _tilesSection(BuildContext context) {
     },
   );
 }
+
+Widget _bentoSection(BuildContext context) => BentoGrid(
+  children: [
+    BentoTile(
+      span: 2,
+      automated: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const CardTag(icon: LucideIcons.sparkles, label: 'Automated insight'),
+          Text(
+            'A full-width tile',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: AppSpace.sm),
+          const Text('Tiles keep a consistent gap and follow reading order.'),
+        ],
+      ),
+    ),
+    BentoTile(
+      onTap: () {},
+      semanticsLabel: 'Add a report',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const IconTile(icon: LucideIcons.filePlus2),
+          const SizedBox(height: AppSpace.md),
+          Text('Add a report', style: Theme.of(context).textTheme.titleSmall),
+        ],
+      ),
+    ),
+    const BentoTile(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IconTile(icon: LucideIcons.chartNoAxesCombined),
+          SizedBox(height: AppSpace.md),
+          Text('See your trends'),
+        ],
+      ),
+    ),
+  ],
+);
 
 bool _rowSwitch = true;
 bool _switchOn = true;
@@ -563,6 +645,70 @@ Widget _feedbackSection(BuildContext context) {
   );
 }
 
+Widget _statusSection(BuildContext context) => Consumer(
+  builder: (context, ref, _) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const AppBanner(),
+      Wrap(
+        spacing: AppSpace.sm,
+        runSpacing: AppSpace.sm,
+        children: [
+          GhostButton(
+            label: 'Offline',
+            compact: true,
+            onPressed: () =>
+                ref.read(appBannerProvider.notifier).setDeviceOffline(true),
+          ),
+          GhostButton(
+            label: 'Retrying',
+            compact: true,
+            onPressed: () {
+              ref.read(appBannerProvider.notifier)
+                ..setDeviceOffline(false)
+                ..setRetrying(true);
+            },
+          ),
+          GhostButton(
+            label: 'Update',
+            compact: true,
+            onPressed: () => ref
+                .read(appBannerProvider.notifier)
+                .setUpdate(
+                  message: 'A new version is available',
+                  onUpdate: () {},
+                ),
+          ),
+          GhostButton(
+            label: 'Info',
+            compact: true,
+            onPressed: () => ref
+                .read(appBannerProvider.notifier)
+                .showInfo('Your changes are saved.'),
+          ),
+          GhostButton(
+            label: 'Clear',
+            compact: true,
+            onPressed: () {
+              final controller = ref.read(appBannerProvider.notifier);
+              controller
+                ..setDeviceOffline(false)
+                ..setRequestOffline(false)
+                ..setOutboxOffline(false)
+                ..setRetrying(false)
+                ..setOutboxSyncing(false)
+                ..clear(AppBannerKind.update)
+                ..clear(AppBannerKind.info);
+            },
+          ),
+        ],
+      ),
+      const SizedBox(height: AppSpace.lg),
+      const AppDisclaimer(),
+    ],
+  ),
+);
+
 Widget _statesSection(BuildContext context) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -596,6 +742,29 @@ Widget _statesSection(BuildContext context) {
     ],
   );
 }
+
+Widget _recoverySection(BuildContext context) => Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    ErrorState.notFound(onPrimary: () {}),
+    _gap(AppSpace.cardGap),
+    ErrorState.reportUnavailable(onPrimary: () {}),
+    _gap(AppSpace.cardGap),
+    ErrorState.serverError(onPrimary: () {}, onSecondary: () {}),
+    _gap(AppSpace.cardGap),
+    ErrorState.permissionDenied(onPrimary: () {}, onSecondary: () {}),
+    _gap(AppSpace.cardGap),
+    ErrorState.sessionExpired(onPrimary: () {}),
+    _gap(AppSpace.cardGap),
+    ErrorState.parseFailed(onPrimary: () {}, onSecondary: () {}),
+    _gap(AppSpace.cardGap),
+    SlowOperationHint(
+      pending: true,
+      onRetry: () {},
+      child: const SkeletonCard(height: 96),
+    ),
+  ],
+);
 
 const List<NavItem> _navItems = <NavItem>[
   NavItem(icon: LucideIcons.home, label: 'Home'),

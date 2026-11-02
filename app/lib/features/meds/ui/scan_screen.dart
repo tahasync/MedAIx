@@ -1,6 +1,9 @@
+/// Sprint 10 feature — dormant until `FeatureFlags.scan`.
 /// Scan medicine (mockup `scan`): explain the camera first, then the
 /// viewfinder with its sweep line, then the matched packet.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -150,16 +153,21 @@ class _Viewfinder extends StatefulWidget {
 }
 
 class _ViewfinderState extends State<_Viewfinder>
-    with SingleTickerProviderStateMixin {
-  static const Duration _sweepDuration = Duration(seconds: 2);
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const double _frameInsetY = 50;
   static const double _frameInsetX = 44;
   static const double _lineInset = 8;
 
   late final AnimationController _sweep = AnimationController(
     vsync: this,
-    duration: _sweepDuration,
+    duration: AppMotion.scanSweep,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didChangeDependencies() {
@@ -168,15 +176,21 @@ class _ViewfinderState extends State<_Viewfinder>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => _sync();
+
+  @override
   void didUpdateWidget(covariant _Viewfinder oldWidget) {
     super.didUpdateWidget(oldWidget);
     _sync();
   }
 
   void _sync() {
-    final bool animate = widget.result == null && !AppMotion.reduced(context);
+    final bool animate =
+        widget.result == null &&
+        !AppMotion.reduced(context) &&
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     if (animate) {
-      if (!_sweep.isAnimating) _sweep.repeat(reverse: true);
+      if (!_sweep.isAnimating) unawaited(_sweep.repeat(reverse: true));
     } else {
       _sweep.stop();
       _sweep.value = 0;
@@ -185,6 +199,7 @@ class _ViewfinderState extends State<_Viewfinder>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sweep.dispose();
     super.dispose();
   }

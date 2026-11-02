@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:tahasync_medaix/core/router.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
-import 'package:intl/intl.dart';
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
 import 'package:tahasync_medaix/features/reports/data/report_models.dart';
@@ -40,9 +40,79 @@ void main() {
       expect(find.text('2 need attention'), findsOneWidget);
       expect(find.text('All read values in range'), findsNWidgets(2));
       expect(
-        find.widgetWithText(PrimaryButton, 'Upload report'),
+        find.widgetWithText(PrimaryButton, 'Add a report'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('search matches report titles and parsed marker names', (
+      tester,
+    ) async {
+      await pumpAt(tester, AppRoutes.reports);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reports-search')),
+        'HbA1c',
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<int>(3)), findsOneWidget);
+      expect(find.byKey(const ValueKey<int>(2)), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reports-search')),
+        'Lipid',
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<int>(2)), findsOneWidget);
+      expect(find.byKey(const ValueKey<int>(3)), findsNothing);
+    });
+
+    testWidgets('filters combine with search and can be cleared', (
+      tester,
+    ) async {
+      await pumpAt(tester, AppRoutes.reports);
+
+      await tester.tap(find.byType(AppChip).at(1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<int>(3)), findsOneWidget);
+      expect(find.byKey(const ValueKey<int>(2)), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reports-search')),
+        'Lipid',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No matching reports'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Clear search'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<int>(3)), findsOneWidget);
+      expect(find.text('No matching reports'), findsNothing);
+    });
+
+    testWidgets('last 30 days filters by the report date', (tester) async {
+      final DateTime now = DateTime.now();
+      final List<LabReport> reports = FakeReportsRepository.sampleReports();
+      final FakeReportsRepository repository = FakeReportsRepository(
+        latency: Duration.zero,
+        uploadDelay: Duration.zero,
+        seed: [
+          reports[0].copyWith(date: now.subtract(const Duration(days: 3))),
+          reports[1].copyWith(date: now.subtract(const Duration(days: 40))),
+          reports[2].copyWith(date: now.subtract(const Duration(days: 80))),
+        ],
+      );
+      await pumpAt(
+        tester,
+        AppRoutes.reports,
+        overrides: fakeOverrides(reports: repository),
+      );
+
+      await tester.tap(find.byType(AppChip).at(2));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<int>(3)), findsOneWidget);
+      expect(find.byKey(const ValueKey<int>(2)), findsNothing);
+      expect(find.byKey(const ValueKey<int>(1)), findsNothing);
     });
 
     testWidgets('empty state invites the first upload', (tester) async {
@@ -60,7 +130,7 @@ void main() {
 
       expect(find.byType(EmptyState), findsOneWidget);
       expect(find.text('No reports yet'), findsOneWidget);
-      expect(find.text('Upload report'), findsOneWidget);
+      expect(find.text('Add a report'), findsOneWidget);
       expect(find.byType(StatusLabel), findsNothing);
     });
 
@@ -114,7 +184,7 @@ void main() {
       await pumpAt(tester, AppRoutes.report(3));
 
       expect(find.text('Blood test'), findsOneWidget);
-      expect(find.text('18 Oct 2026 · Blood test'), findsOneWidget);
+      expect(find.text('Blood test · 18 Oct 2026'), findsOneWidget);
       expect(find.text('In plain words'), findsOneWidget);
       expect(
         find.textContaining('Your blood sugar average is slightly high.'),
@@ -126,7 +196,52 @@ void main() {
       expect(find.text('Slightly high'), findsOneWidget);
       expect(find.text('Normal'), findsNWidgets(2));
       expect(find.byType(StatusLabel), findsNWidgets(4));
-      expect(find.text('View trend over time'), findsOneWidget);
+      expect(find.text('Values read'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-values-read')),
+          matching: find.text('4'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Need attention'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-needs-attention')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('From the report'), findsOneWidget);
+      expect(find.text('See how this changes'), findsOneWidget);
+      expect(
+        find.text('MedAIx explains reports; it is not a diagnosis.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('all-in-range report shows zero values needing attention', (
+      tester,
+    ) async {
+      await pumpAt(tester, AppRoutes.report(2));
+
+      expect(find.text('Values read'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-values-read')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Need attention'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-needs-attention')),
+          matching: find.text('0'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('From the report'), findsOneWidget);
     });
 
     testWidgets('Original text toggle reveals the OCR text', (tester) async {
@@ -148,7 +263,7 @@ void main() {
     testWidgets('a report with no parsed values shows the full rewrite', (
       tester,
     ) async {
-      final LabReport unparsed = LabReport(
+      const LabReport unparsed = LabReport(
         id: 9,
         title: 'Lab report',
         dateLabel: 'Today',
@@ -182,7 +297,24 @@ void main() {
       );
       expect(find.byType(StatusLabel), findsNothing);
       expect(find.text('This photo was hard to read'), findsOneWidget);
-      expect(find.text('View trend over time'), findsOneWidget);
+      expect(find.text('Values read'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-values-read')),
+          matching: find.text('0'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('report-needs-attention')),
+          matching: find.text('0'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Need attention'), findsOneWidget);
+      expect(find.text('From your upload'), findsOneWidget);
+      expect(find.text('See how this changes'), findsOneWidget);
     });
 
     testWidgets('missing report shows an error with a way back', (
@@ -190,8 +322,8 @@ void main() {
     ) async {
       await pumpAt(tester, AppRoutes.report(404));
 
-      expect(find.byType(ErrorCard), findsOneWidget);
-      expect(find.text('Couldn’t open this report'), findsOneWidget);
+      expect(find.byType(ErrorState), findsOneWidget);
+      expect(find.text('This report isn’t available'), findsOneWidget);
       expect(find.text('Back to reports'), findsOneWidget);
     });
   });
@@ -204,7 +336,7 @@ void main() {
       await pumpAt(tester, '${AppRoutes.trends}?marker=HbA1c');
 
       expect(find.text('HbA1c trend'), findsOneWidget);
-      expect(find.text('Sample data · 4 results'), findsOneWidget);
+      expect(find.text('From 4 reports'), findsOneWidget);
       expect(find.text('Normal 4.0–6.0 %'), findsOneWidget);
       expect(
         find.bySemanticsLabel(
@@ -217,6 +349,14 @@ void main() {
       expect(find.text('1 Oct 2026 · 6.4 %'), findsOneWidget);
       expect(find.text('Rising 3 times in a row'), findsOneWidget);
       expect(find.text('Find a specialist'), findsOneWidget);
+      expect(
+        find.text('MedAIx explains reports; it is not a diagnosis.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('MedAIx explains reports; it is not a diagnosis.'),
+        findsOneWidget,
+      );
       handle.dispose();
     });
 
@@ -225,7 +365,7 @@ void main() {
 
       expect(find.text('Trend details'), findsOneWidget);
       expect(find.text('Not enough reports yet'), findsOneWidget);
-      expect(find.text('Upload report'), findsOneWidget);
+      expect(find.text('Add a report'), findsOneWidget);
     });
 
     testWidgets('Find a specialist opens the doctor screen', (tester) async {
@@ -262,7 +402,7 @@ void main() {
       await tester.tap(find.text('LDL'));
       await tester.pumpAndSettle();
       expect(find.text('LDL trend'), findsOneWidget);
-      expect(find.text('Sample data · 3 results'), findsOneWidget);
+      expect(find.text('From 3 reports'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Back'));
       await tester.pumpAndSettle();
@@ -285,7 +425,7 @@ void main() {
 
       expect(find.text('Not enough reports yet'), findsOneWidget);
       expect(find.textContaining('You have one report.'), findsOneWidget);
-      expect(find.text('Upload report'), findsOneWidget);
+      expect(find.text('Add a report'), findsOneWidget);
       expect(find.byType(AiInsightCard), findsNothing);
     });
 

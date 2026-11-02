@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/pressable.dart';
 import '../../../data/repositories.dart';
 import '../data/settings_repository.dart';
 
@@ -69,3 +70,24 @@ final onboardingSeenProvider =
     AsyncNotifierProvider<OnboardingSeenController, bool>(
       OnboardingSeenController.new,
     );
+
+class HapticsController extends AsyncNotifier<bool> {
+  @override
+  Future<bool> build() async {
+    final bool enabled = await ref
+        .watch(settingsRepositoryProvider)
+        .loadHapticsEnabled();
+    ref.read(appHapticsProvider).enabled = enabled;
+    return enabled;
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    state = AsyncData(enabled);
+    ref.read(appHapticsProvider).enabled = enabled;
+    await ref.read(settingsRepositoryProvider).saveHapticsEnabled(enabled);
+  }
+}
+
+final hapticsEnabledProvider = AsyncNotifierProvider<HapticsController, bool>(
+  HapticsController.new,
+);

@@ -5,11 +5,17 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/features.dart';
+import 'package:tahasync_medaix/core/router.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
 
 import 'support/test_app.dart';
 
 void main() {
+  test('component gallery route is omitted from production builds', () {
+    expect(galleryRoutesForBuild(debugBuild: false), isEmpty);
+    expect(galleryRoutesForBuild(debugBuild: true), hasLength(1));
+  });
+
   test('this build is Sprint 5: trends and wellness on, later epics off', () {
     const FeatureFlags f = FeatureFlags(kBuildSprint);
     expect(kBuildSprint, 5);
@@ -62,8 +68,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Upload report'), findsWidgets);
-    expect(find.text('View trends'), findsOneWidget);
+    expect(find.text('Add a report'), findsWidgets);
+    expect(find.text('See my trends'), findsOneWidget);
     expect(find.text('Check medicines'), findsNothing);
     expect(find.text('Scan medicine'), findsNothing);
     expect(find.text('Find a doctor'), findsNothing);
@@ -79,7 +85,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Medicine check'), findsNothing);
-    expect(find.text('View trends'), findsOneWidget);
+    expect(find.text('See my trends'), findsOneWidget);
   });
 
   testWidgets('a delivered sub-route still opens', (tester) async {
@@ -93,7 +99,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('trend'), findsWidgets);
-    expect(find.text('View trends'), findsNothing);
+    expect(find.text('See my trends'), findsNothing);
   });
 
   testWidgets('Settings hides reminders and sharing rows', (tester) async {

@@ -3,14 +3,34 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/router.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
+import 'package:tahasync_medaix/data/api/api_client.dart';
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/data/repositories.dart';
+import 'package:tahasync_medaix/features/reports/data/report_models.dart';
+import 'package:tahasync_medaix/features/reports/data/reports_repository.dart';
 import 'package:tahasync_medaix/features/reports/providers/upload_providers.dart';
 import 'package:tahasync_medaix/features/reports/ui/upload_screen.dart';
 
 import 'support/test_app.dart';
 
 const String kPickedPath = 'C:/photos/report.jpg';
+
+class ExpiredSessionReportsRepository extends FakeReportsRepository {
+  ExpiredSessionReportsRepository()
+    : super(latency: Duration.zero, uploadDelay: Duration.zero);
+
+  @override
+  Future<LabReport> uploadReport(
+    String filePath, {
+    ReportLanguage language = ReportLanguage.english,
+    String? uploadId,
+    void Function(UploadPhase phase)? onPhase,
+  }) async => throw RepositoryException(
+    'Please sign in to continue.',
+    canRetry: false,
+    cause: ApiException('Please sign in to continue.', statusCode: 401),
+  );
+}
 
 /// Picker and permission stand-ins: no platform channels in tests.
 List<Override> pickerOverrides({
@@ -149,26 +169,19 @@ void main() {
       await tester.tap(find.text('Choose from gallery or files'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(ErrorCard), findsOneWidget);
-      expect(find.text('Couldn’t read this photo'), findsOneWidget);
+      expect(find.byType(ErrorState), findsOneWidget);
+      expect(find.text('We couldn’t read this report'), findsOneWidget);
       expect(
-        find.textContaining('The image was too blurry to find any values.'),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining(
-          'Retrying this upload uses the same request id, so it will not '
-          'create a duplicate report. Your other reports are safe.',
+        find.text(
+          'Retake the photo in good light with the whole page in frame.',
         ),
         findsOneWidget,
       );
       expect(find.text('Try again'), findsNothing);
 
-      await tester.tap(find.text('Choose another file'));
+      await tester.tap(find.text('Choose from gallery'));
       await tester.pumpAndSettle();
-      expect(find.byType(ErrorCard), findsNothing);
-      expect(find.text('Scan a report'), findsOneWidget);
-      expect(find.text('Add a report'), findsOneWidget);
+      expect(find.text('In plain words'), findsOneWidget);
     });
 
     testWidgets('retryable failure offers Try again', (tester) async {
@@ -288,11 +301,13 @@ void main() {
       await tester.tap(find.text('Allow camera'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Camera access was declined'), findsOneWidget);
-      expect(find.text('Allow camera'), findsOneWidget);
+      expect(find.byType(ErrorState), findsOneWidget);
+      expect(find.text('MedAIx needs camera access to scan'), findsOneWidget);
+      expect(find.text('Open settings'), findsOneWidget);
+      expect(find.text('Choose from gallery'), findsOneWidget);
       expect(picked, isEmpty);
 
-      await tester.tap(find.text('Choose a file instead'));
+      await tester.tap(find.text('Choose from gallery'));
       await tester.pumpAndSettle();
       expect(picked, <UploadSource>[UploadSource.gallery]);
       expect(find.text('In plain words'), findsOneWidget);
@@ -322,9 +337,75 @@ void main() {
       await tester.tap(find.text('Allow camera'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('turned off for MedAIx'), findsOneWidget);
+      expect(find.byType(ErrorState), findsOneWidget);
+      expect(find.text('MedAIx needs camera access to scan'), findsOneWidget);
       expect(find.text('Open settings'), findsOneWidget);
     });
+
+    testWidgets('gallery permission denial offers settings and recovery', (
+      tester,
+    ) async {
+      await usePhone(tester);
+      await tester.pumpWidget(
+        testAppAt(
+          AppRoutes.upload,
+          overrides: <Override>[
+            ...fakeOverrides(),
+            filePickerProvider.overrideWithValue((_) async {
+              throw const FilePermissionDenied();
+            }),
+            cameraPermissionProvider.overrideWithValue(
+              () async => CameraPermission.allowed,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Choose from gallery or files'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ErrorState), findsOneWidget);
+      expect(
+        find.text('MedAIx needs photo access to add a report'),
+        findsOneWidget,
+      );
+      expect(find.text('Open settings'), findsOneWidget);
+      expect(find.text('Choose from gallery'), findsOneWidget);
+    });
+
+    testWidgets(
+      'expired session asks for sign-in and preserves pending upload',
+      (tester) async {
+        await usePhone(tester);
+        await tester.pumpWidget(
+          testAppAt(
+            AppRoutes.upload,
+            overrides: <Override>[
+              ...fakeOverrides(reports: ExpiredSessionReportsRepository()),
+              ...pickerOverrides(),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Choose from gallery or files'));
+        await tester.pumpAndSettle();
+        expect(find.byType(ErrorState), findsOneWidget);
+        expect(find.text('Please sign in again'), findsOneWidget);
+
+        await tester.tap(find.text('Sign in'));
+        await tester.pumpAndSettle();
+        expect(find.text('Welcome back'), findsOneWidget);
+
+        final ProviderContainer container = ProviderScope.containerOf(
+          tester.element(find.text('Welcome back')),
+        );
+        final UploadFailure pending =
+            container.read(uploadControllerProvider) as UploadFailure;
+        expect(pending.filePath, kPickedPath);
+        expect(pending.uploadId, isNotEmpty);
+      },
+    );
   });
 
   group('layout', () {

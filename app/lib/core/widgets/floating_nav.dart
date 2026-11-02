@@ -111,7 +111,9 @@ class _NavButton extends StatelessWidget {
           child: InkWell(
             borderRadius: AppRadius.navItemAll,
             onTap: () {
-              if (!selected) AppHaptics.select();
+              if (!selected) {
+                playHaptic(context, (haptics) => haptics.select());
+              }
               onTap();
             },
             child: LayoutBuilder(

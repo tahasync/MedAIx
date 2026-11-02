@@ -65,6 +65,9 @@ _MIN_LONG_EDGE = 1500
 # the OCR engine at full resolution.
 _MAX_LONG_EDGE = 3000
 
+# A report scan is allowed to spend at most this long in each Tesseract pass.
+OCR_TIMEOUT_SECONDS = 30
+
 # Deskew searches a downscaled probe, not the full image. The projection
 # profile's peak angle is scale-invariant, but every candidate rotation costs
 # O(pixels), so probing at ~1000px on the long edge removes the dominant cost of
@@ -105,6 +108,10 @@ class OcrUnavailableError(RuntimeError):
     Distinct from a failed extraction: the caller should say the feature is
     unavailable rather than "we could not read your report".
     """
+
+
+class OcrTimeoutError(RuntimeError):
+    """Tesseract exceeded its per-pass runtime limit."""
 
 
 class OcrLanguage(StrEnum):
@@ -319,9 +326,18 @@ def extract_text(
 def _read_pass(
     image: Image.Image, language: str, config: str
 ) -> tuple[str, float]:
-    data = pytesseract.image_to_data(
-        image, lang=language, config=config, output_type=Output.DICT
-    )
+    try:
+        data = pytesseract.image_to_data(
+            image,
+            lang=language,
+            config=config,
+            output_type=Output.DICT,
+            timeout=OCR_TIMEOUT_SECONDS,
+        )
+    except RuntimeError as exc:
+        if "timeout" in str(exc).lower():
+            raise OcrTimeoutError from exc
+        raise
     lines: dict[tuple[int, int, int], list[str]] = {}
     confidences: list[float] = []
     for index, (word, confidence) in enumerate(zip(data["text"], data["conf"], strict=True)):

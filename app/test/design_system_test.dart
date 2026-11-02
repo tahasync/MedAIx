@@ -323,6 +323,91 @@ void main() {
         AppSize.navItemWidth - 2 * AppSize.navIndicatorGap,
       );
     });
+
+    testWidgets('nav uses surface2 and a flat hairline in dark mode', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        testScreen(
+          Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: FloatingNav(
+                items: const <NavItem>[
+                  NavItem(icon: LucideIcons.home, label: 'Home'),
+                  NavItem(icon: LucideIcons.fileText, label: 'Reports'),
+                  NavItem(icon: LucideIcons.heart, label: 'Wellness'),
+                  NavItem(icon: LucideIcons.menu, label: 'More'),
+                ],
+                selectedIndex: 0,
+                onSelected: (_) {},
+              ),
+            ),
+          ),
+          themeMode: ThemeMode.dark,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final context = tester.element(find.text('Home'));
+      final colors = Theme.of(context).extension<AppColors>()!;
+      final nav = tester.widget<Container>(
+        find
+            .byWidgetPredicate(
+              (widget) =>
+                  widget is Container &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration! as BoxDecoration).color ==
+                      colors.surface2,
+            )
+            .first,
+      );
+      final decoration = nav.decoration! as BoxDecoration;
+      expect(decoration.boxShadow, isEmpty);
+      expect(decoration.border!.top.width, 1);
+      expect(decoration.border!.top.color, colors.hairline);
+    });
+
+    testWidgets('light nav keeps the surface2 shadow treatment', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        testScreen(
+          Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: FloatingNav(
+                items: const <NavItem>[
+                  NavItem(icon: LucideIcons.home, label: 'Home'),
+                  NavItem(icon: LucideIcons.fileText, label: 'Reports'),
+                  NavItem(icon: LucideIcons.heart, label: 'Wellness'),
+                  NavItem(icon: LucideIcons.menu, label: 'More'),
+                ],
+                selectedIndex: 0,
+                onSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final colors = Theme.of(
+        tester.element(find.text('Home')),
+      ).extension<AppColors>()!;
+      final nav = tester.widget<Container>(
+        find
+            .byWidgetPredicate(
+              (widget) =>
+                  widget is Container &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration! as BoxDecoration).color ==
+                      colors.surface2,
+            )
+            .first,
+      );
+      final decoration = nav.decoration! as BoxDecoration;
+      expect(decoration.boxShadow, AppShadow.nav);
+      expect(decoration.border, isNull);
+    });
   });
 
   testWidgets('upload progress fill grows from the leading edge', (
@@ -330,9 +415,9 @@ void main() {
   ) async {
     await tester.pumpWidget(
       testScreen(
-        Scaffold(
+        const Scaffold(
           body: Center(
-            child: SizedBox(width: 200, child: const ProgressBar(value: 0.25)),
+            child: SizedBox(width: 200, child: ProgressBar(value: 0.25)),
           ),
         ),
       ),
@@ -409,7 +494,7 @@ void main() {
 
     test('no gradients outside the skeleton shimmer', () {
       for (final File f in files) {
-        if (rel(f).endsWith('core/widgets/feedback.dart')) continue;
+        if (rel(f).endsWith('core/widgets/feedback_loading.dart')) continue;
         final String src = f.readAsStringSync();
         expect(src, isNot(contains('LinearGradient(')), reason: rel(f));
         expect(src, isNot(contains('RadialGradient(')), reason: rel(f));

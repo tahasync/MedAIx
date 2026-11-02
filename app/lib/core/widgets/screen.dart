@@ -4,8 +4,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../theme/app_theme.dart';
 import '../connectivity.dart';
+import 'app_banner.dart';
 import 'buttons.dart';
 import 'feedback.dart';
+import 'pressable.dart';
 
 /// Mockup `.hd`: h1 title, optional muted small subtitle, optional trailing
 /// widget (an icon button), 18 px below.
@@ -127,8 +129,14 @@ class AppScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bool offline =
-        showOfflineBanner && ref.watch(isOfflineProvider).valueOrNull == true;
+    final banners = ref.watch(appBannerProvider);
+    if (showOfflineBanner && insetForNav) {
+      ref.listen(isOfflineProvider, (_, next) {
+        ref
+            .read(appBannerProvider.notifier)
+            .setDeviceOffline(next.valueOrNull == true);
+      });
+    }
     final double bottomInset = insetForNav
         ? AppSize.navClearance
         : AppSpace.xxxl + MediaQuery.paddingOf(context).bottom;
@@ -144,12 +152,22 @@ class AppScreen extends ConsumerWidget {
         AppSpace.screen,
         bottomInset,
       ),
-      children: [if (offline) const OfflineBanner(), ?header, ...children],
+      children: [
+        ?header,
+        if (showOfflineBanner && insetForNav && banners.isNotEmpty) ...[
+          const AppBanner(),
+          const SizedBox(height: AppSpace.cardGap),
+        ],
+        ...children,
+      ],
     );
 
     if (onRefresh != null) {
       list = RefreshIndicator(
-        onRefresh: onRefresh!,
+        onRefresh: () async {
+          playHaptic(context, (haptics) => haptics.refresh());
+          await onRefresh!();
+        },
         color: context.colors.text,
         backgroundColor: context.colors.surface2,
         child: list,
@@ -173,7 +191,9 @@ class AppScreen extends ConsumerWidget {
       );
     }
 
-    return SafeArea(bottom: !insetForNav, child: body);
+    return ShimmerScope(
+      child: SafeArea(bottom: !insetForNav, child: body),
+    );
   }
 }
 

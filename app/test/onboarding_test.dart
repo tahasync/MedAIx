@@ -417,7 +417,7 @@ void main() {
 
         await _tapButton(tester, 'Upload your first report');
         expect(find.byType(OnboardingScreen), findsNothing);
-        expect(find.text('Upload report'), findsWidgets);
+        expect(find.text('Add a report'), findsWidgets);
       },
     );
 

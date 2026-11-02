@@ -74,10 +74,6 @@ const List<Option> kGoalOptions = <Option>[
   (value: 'habits', label: 'Build healthy habits'),
 ];
 
-/// Placeholder policy links until the real pages are published.
-const String kTermsUrl = 'https://medaix.app/terms';
-const String kPrivacyUrl = 'https://medaix.app/privacy';
-
 /// 1.6 and 1.7, word for word from the spec.
 const String kTermsConsentText = 'I agree to the Terms and Privacy Policy';
 const String kHealthConsentText =

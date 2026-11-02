@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/connectivity.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
+import '../../auth/data/session_errors.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../../home/providers/home_providers.dart';
 import '../data/wellness_repository.dart';
 import '../providers/wellness_providers.dart';
+import 'wellness_log_dialogs.dart';
 
 /// One tap of the water button, as in the mockup.
 const int kWaterStepMl = 250;
@@ -23,6 +25,7 @@ class WellnessScreen extends ConsumerWidget {
         .read(wellnessProvider.notifier)
         .addWater(kWaterStepMl);
     if (ok == null || !context.mounted) return;
+    playHaptic(context, (haptics) => ok ? haptics.success() : haptics.error());
     ref.invalidate(habitTodayProvider);
     showToast(
       context,
@@ -33,15 +36,16 @@ class WellnessScreen extends ConsumerWidget {
   }
 
   Future<void> _logActivity(BuildContext context, WidgetRef ref) async {
-    final _MovementEntry? entry = await showDialog<_MovementEntry>(
+    final MovementEntry? entry = await showDialog<MovementEntry>(
       context: context,
-      builder: (_) => const _LogMovementDialog(),
+      builder: (_) => const LogMovementDialog(),
     );
     if (entry == null || !context.mounted) return;
     final bool? ok = await ref
         .read(wellnessProvider.notifier)
         .logExercise(entry.activity, minutes: entry.minutes);
     if (ok == null || !context.mounted) return;
+    playHaptic(context, (haptics) => ok ? haptics.success() : haptics.error());
     ref.invalidate(habitTodayProvider);
     showToast(
       context,
@@ -54,11 +58,12 @@ class WellnessScreen extends ConsumerWidget {
   Future<void> _logSteps(BuildContext context, WidgetRef ref) async {
     final int? steps = await showDialog<int>(
       context: context,
-      builder: (_) => const _LogStepsDialog(),
+      builder: (_) => const LogStepsDialog(),
     );
     if (steps == null || !context.mounted) return;
     final bool? ok = await ref.read(wellnessProvider.notifier).addSteps(steps);
     if (ok == null || !context.mounted) return;
+    playHaptic(context, (haptics) => ok ? haptics.success() : haptics.error());
     ref.invalidate(habitTodayProvider);
     showToast(
       context,
@@ -70,10 +75,14 @@ class WellnessScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(wellnessProvider, (_, next) {
+      final day = next.valueOrNull;
+      ref.read(appBannerProvider.notifier)
+        ..setOutboxOffline(day?.isOffline == true)
+        ..setOutboxSyncing((day?.pendingSyncCount ?? 0) > 0);
+    });
     final AsyncValue<WellnessDay> day = ref.watch(wellnessProvider);
     final WellnessDay? value = day.valueOrNull;
-    final bool deviceOffline =
-        ref.watch(isOfflineProvider).valueOrNull ?? false;
 
     return AppScaffold(
       body: AppScreen(
@@ -93,24 +102,24 @@ class WellnessScreen extends ConsumerWidget {
             SkeletonCard(height: 96),
           ],
           error: (error, _) => [
-            ErrorCard(
-              title: 'Couldn’t load today’s habits',
-              message: friendlyWellnessError(
-                error,
-                'We couldn’t reach your habit log.',
-              ),
-              dataSafety: 'Unsynced entries stay saved on this device.',
-              onPrimary: () => ref.read(wellnessProvider.notifier).refresh(),
-            ),
+            isSessionExpired(error)
+                ? ErrorState.sessionExpired(
+                    onPrimary: () => ref
+                        .read(authControllerProvider.notifier)
+                        .expireSession(),
+                  )
+                : ErrorCard(
+                    title: 'Couldn’t load today’s habits',
+                    message: friendlyWellnessError(
+                      error,
+                      'We couldn’t reach your habit log.',
+                    ),
+                    dataSafety: 'Unsynced entries stay saved on this device.',
+                    onPrimary: () =>
+                        ref.read(wellnessProvider.notifier).refresh(),
+                  ),
           ],
           data: (d) => [
-            if (deviceOffline || d.isOffline || d.pendingSyncCount > 0)
-              OfflineBanner(
-                message: d.pendingSyncCount > 0
-                    ? '${d.pendingSyncCount} ${d.pendingSyncCount == 1 ? 'entry is' : 'entries are'} '
-                          'saved on this device and will sync when you’re back online.'
-                    : 'You’re offline. Your saved log is shown; new entries will sync when you’re back online.',
-              ),
             _TodayProgressCard(day: d),
             const SectionTitle('Hydration'),
             _HabitCard(
@@ -245,153 +254,6 @@ String _dayLabel(String? value) {
   return '${weekdays[date.weekday - 1]}, ${months[date.month - 1]} ${date.day}';
 }
 
-class _MovementEntry {
-  const _MovementEntry({required this.activity, required this.minutes});
-
-  final String activity;
-  final int minutes;
-}
-
-class _LogMovementDialog extends StatefulWidget {
-  const _LogMovementDialog();
-
-  @override
-  State<_LogMovementDialog> createState() => _LogMovementDialogState();
-}
-
-class _LogMovementDialogState extends State<_LogMovementDialog> {
-  final TextEditingController _activity = TextEditingController(text: 'Walk');
-  final TextEditingController _minutes = TextEditingController(text: '10');
-  String? _activityError;
-  String? _minutesError;
-
-  @override
-  void dispose() {
-    _activity.dispose();
-    _minutes.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Log movement'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        TextField(
-          controller: _activity,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: InputDecoration(
-            labelText: 'Activity',
-            hintText: 'Walk, stretching or cycling',
-            errorText: _activityError,
-          ),
-        ),
-        const SizedBox(height: AppSpace.lg),
-        TextField(
-          controller: _minutes,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: 'Minutes',
-            hintText: 'For example, 15',
-            errorText: _minutesError,
-          ),
-        ),
-      ],
-    ),
-    actions: [
-      GhostButton(
-        label: 'Cancel',
-        compact: true,
-        onPressed: () => Navigator.pop(context),
-      ),
-      PrimaryButton(
-        label: 'Save activity',
-        compact: true,
-        onPressed: () {
-          final String activity = _activity.text.trim();
-          final int? minutes = int.tryParse(_minutes.text.trim());
-          if (activity.isEmpty || activity.length > 40) {
-            setState(
-              () => _activityError =
-                  'Enter an activity name up to 40 characters.',
-            );
-            return;
-          }
-          setState(() => _activityError = null);
-          if (minutes == null || minutes < 1 || minutes > 480) {
-            setState(
-              () => _minutesError = 'Enter a duration from 1 to 480 minutes.',
-            );
-            return;
-          }
-          setState(() => _minutesError = null);
-          Navigator.pop(
-            context,
-            _MovementEntry(activity: activity, minutes: minutes),
-          );
-        },
-      ),
-    ],
-  );
-}
-
-class _LogStepsDialog extends StatefulWidget {
-  const _LogStepsDialog();
-
-  @override
-  State<_LogStepsDialog> createState() => _LogStepsDialogState();
-}
-
-class _LogStepsDialogState extends State<_LogStepsDialog> {
-  final TextEditingController _input = TextEditingController();
-  String? _validationError;
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Log steps'),
-    content: TextField(
-      controller: _input,
-      autofocus: true,
-      keyboardType: TextInputType.number,
-      decoration: InputDecoration(
-        labelText: 'Steps to add',
-        hintText: 'For example, 1200',
-        errorText: _validationError,
-      ),
-    ),
-    actions: [
-      GhostButton(
-        label: 'Cancel',
-        compact: true,
-        onPressed: () => Navigator.pop(context),
-      ),
-      PrimaryButton(
-        label: 'Log steps',
-        compact: true,
-        onPressed: () {
-          final int? value = int.tryParse(_input.text.trim());
-          if (value == null || value < 1 || value > 50000) {
-            setState(
-              () => _validationError = 'Enter a number from 1 to 50,000.',
-            );
-            return;
-          }
-          Navigator.pop(context, value);
-        },
-      ),
-    ],
-  );
-}
-
-/// Mockup habit card: icon tile, bold title, muted small subtitle, optional
-/// trailing control, optional progress bar 12 px below.
 class _HabitCard extends StatelessWidget {
   const _HabitCard({
     required this.icon,

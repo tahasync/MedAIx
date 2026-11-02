@@ -1,3 +1,5 @@
+/// Sprint 9/10 feature — dormant until
+/// `FeatureFlags.meds` / `FeatureFlags.scan`.
 /// Medicines, interaction checks and packet scanning. Fake-only until the
 /// backend grows these endpoints.
 library;

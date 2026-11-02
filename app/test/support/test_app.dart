@@ -277,6 +277,7 @@ Widget testScreen(
   ThemeMode themeMode = ThemeMode.light,
   Size size = const Size(390, 844),
   double textScale = 1,
+  bool disableAnimations = false,
 }) {
   return ProviderScope(
     overrides: <Override>[...fakeOverrides(), ...overrides],
@@ -284,6 +285,7 @@ Widget testScreen(
       data: MediaQueryData(
         size: size,
         textScaler: TextScaler.linear(textScale),
+        disableAnimations: disableAnimations,
       ),
       child: MaterialApp(
         theme: AppTheme.light,

@@ -1,3 +1,4 @@
+/// Sprint 13 feature — dormant until `FeatureFlags.reminders`.
 /// Reminder switches (mockup `reminders`), persisted on this device.
 library;
 

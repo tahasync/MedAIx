@@ -17,6 +17,7 @@ class PrefsSettingsRepository implements SettingsRepository {
   static const String _remWater = 'reminder_water';
   static const String _remFollowUp = 'reminder_follow_up';
   static const String _onboardingSeen = 'onboarding_seen';
+  static const String _hapticsEnabled = 'haptics_enabled';
 
   @override
   Future<ThemeMode> loadThemeMode() async {
@@ -55,4 +56,12 @@ class PrefsSettingsRepository implements SettingsRepository {
   @override
   Future<void> saveOnboardingSeen(bool seen) =>
       _prefs.setBool(_onboardingSeen, seen);
+
+  @override
+  Future<bool> loadHapticsEnabled() async =>
+      await _prefs.getBool(_hapticsEnabled) ?? true;
+
+  @override
+  Future<void> saveHapticsEnabled(bool enabled) =>
+      _prefs.setBool(_hapticsEnabled, enabled);
 }

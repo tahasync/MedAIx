@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
-import 'package:tahasync_medaix/features/wellness/ui/wellness_screen.dart';
 import 'package:tahasync_medaix/features/wellness/data/wellness_repository.dart';
+import 'package:tahasync_medaix/features/wellness/ui/wellness_screen.dart';
 
 import 'support/test_app.dart';
 

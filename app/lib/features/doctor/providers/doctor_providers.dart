@@ -1,3 +1,4 @@
+/// Sprint 11 feature — dormant until `FeatureFlags.doctorMatch`.
 /// Symptom chips and the specialist match for the Find-a-doctor screen.
 library;
 

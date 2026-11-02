@@ -101,7 +101,7 @@ class SupabaseAuthGateway implements AuthGateway {
       return const AuthResult();
     } on AuthException catch (error) {
       return AuthResult(message: _messageFor(error));
-    } catch (_) {
+    } on Object catch (_) {
       return const AuthResult(
         message: 'Could not reach the sign-in service. Try again.',
       );
@@ -125,7 +125,7 @@ class SupabaseAuthGateway implements AuthGateway {
       return const AuthResult();
     } on AuthException catch (error) {
       return AuthResult(message: _messageFor(error, signingUp: true));
-    } catch (_) {
+    } on Object catch (_) {
       return const AuthResult(
         message: 'Could not reach the sign-in service. Try again.',
       );
@@ -152,7 +152,7 @@ class SupabaseAuthGateway implements AuthGateway {
       return const AuthResult();
     } on AuthException catch (error) {
       return AuthResult(message: _codeMessageFor(error));
-    } catch (_) {
+    } on Object catch (_) {
       return const AuthResult(
         message: 'Could not reach the sign-in service. Try again.',
       );
@@ -170,7 +170,7 @@ class SupabaseAuthGateway implements AuthGateway {
       return const AuthResult(needsEmailConfirmation: true);
     } on AuthException catch (error) {
       return AuthResult(message: _messageFor(error, signingUp: true));
-    } catch (_) {
+    } on Object catch (_) {
       return const AuthResult(
         message: 'Could not reach the sign-in service. Try again.',
       );
@@ -192,7 +192,7 @@ class SupabaseAuthGateway implements AuthGateway {
       return const AuthResult();
     } on AuthException catch (error) {
       return AuthResult(message: _messageFor(error));
-    } catch (_) {
+    } on Object catch (_) {
       return const AuthResult(
         message: 'Could not reach Google sign-in. Try again.',
       );

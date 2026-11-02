@@ -2,6 +2,7 @@
 /// unchanged from the Sprint 2 suite; only the import path moved.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:fake_async/fake_async.dart';
@@ -73,11 +74,13 @@ void main() {
       fakeAsync((async) {
         // Block-bodied onError: an expression body would return the
         // assignment's value, which is not the Future<bool>'s type.
-        client.checkHealth().then(
-          (_) {},
-          onError: (Object e) {
-            caught = e;
-          },
+        unawaited(
+          client.checkHealth().then(
+            (_) {},
+            onError: (Object e) {
+              caught = e;
+            },
+          ),
         );
         // 30s timeout + 2s retry gap, three times over, with slack.
         async.elapse(const Duration(minutes: 5));

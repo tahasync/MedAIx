@@ -1,3 +1,4 @@
+/// Sprint 12 feature — dormant until `FeatureFlags.share`.
 /// Share with doctor (mockup `qr`): pick a duration and create a code, or
 /// show the active QR with its countdown and "Revoke access now".
 library;

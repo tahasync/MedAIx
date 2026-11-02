@@ -38,4 +38,8 @@ abstract class SettingsRepository {
   Future<bool> loadOnboardingSeen();
 
   Future<void> saveOnboardingSeen(bool seen);
+
+  Future<bool> loadHapticsEnabled();
+
+  Future<void> saveHapticsEnabled(bool enabled);
 }

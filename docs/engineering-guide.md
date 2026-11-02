@@ -6,6 +6,9 @@ patients. Two codebases live here:
 - `api/` — FastAPI + Tesseract OCR + rule-based simplification. Secrets live in
   `api/.env` (never print, log or commit its values; the Flutter app receives
   `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `API_BASE_URL` only via `--dart-define`).
+  OCR-to-marker/date/unit parsing lives in `trend_parsing.py`; trend range,
+  status, alert and response assembly stays in `trends.py` behind compatibility
+  imports.
 - `app/` — Flutter 3.44 / Dart 3.12 client. This file is mostly about `app/`.
 
 Changes stay local until the owner decides to publish.
@@ -26,11 +29,47 @@ app/lib/
            connectivity.dart isOfflineProvider
            update_checker.dart "Update available" dialog
   data/    repositories.dart  Riverpod providers wiring interfaces → implementations
-           api/             ApiClient + ApiReportsRepository / ApiProfileRepository
-           fake/            in-memory fakes (meds, wellness, share, doctor, insights, …)
+           api/             ApiClient, response models, and API repositories
+           fake/            in-memory fakes, split by feature behind fake_repositories.dart
            prefs/           SharedPreferences-backed settings
   features/<feature>/{data,providers,ui}
 ```
+
+Large feature modules are kept focused by responsibility: onboarding state is
+in `features/onboarding/providers/onboarding_state.dart`; profile controls are
+in `profile_*_fields.dart` and profile read/edit views are separate files;
+feedback loading, states, switch and score ring have separate modules behind
+`core/widgets/feedback.dart`; update fetching and its prompt are split behind
+`core/update_checker.dart`; trend drawing lives in `features/reports/ui/trend_chart.dart`;
+and wellness logging dialogs live in `wellness_log_dialogs.dart`. The API
+response DTOs live in `data/api/api_models.dart`, exported by `api_client.dart`.
+
+## 1a. Larger files retained after the focused splits
+
+These remain over 400 lines because each currently contains one cohesive
+responsibility or a test matrix that imports the same application module. They
+need their own mechanical extraction step and full API/widget gate before a
+safe move; no broad split is bundled into the component refactors above.
+
+| File | Current responsibility and reason retained |
+| --- | --- |
+| `api/main.py` | Application setup, middleware, schemas and endpoint handlers share startup/database dependencies; router extraction needs per-router API contract tests. |
+| `api/ocr.py` | OCR provider setup, document conversion and extraction fallback share provider-specific state and cleanup; split after an OCR adapter contract is established. |
+| `api/trends.py`, `api/trend_parsing.py` | Parsing and trend assembly now have separate modules; each remains slightly over 400 lines because its regex pipeline and clinical rule pipeline each preserve ordered private helpers and public compatibility imports. |
+| `api/simplify.py` | Rule ordering and phrase replacement form one ordered transformation pipeline; moving helpers risks changing replacement precedence. |
+| `api/tests/test_main.py`, `api/tests/test_trends.py` | Endpoint and clinical parsing regression matrices remain together with the fixture contracts they exercise. |
+| `app/lib/data/api/api_client.dart` | HTTP retry, auth header, transport mapping and request lifecycle are coordinated by one client; method extraction needs an explicit shared transport interface. |
+| `app/lib/data/api/api_repositories.dart` | Repository adapters map the API client’s related report and profile contracts; separate by domain alongside dedicated repository contract tests. |
+| `app/lib/core/router.dart` | Route definitions, redirects, guards and navigation helpers share the same route table; split alongside typed route contracts to keep path behavior consistent. |
+| `app/lib/features/auth/ui/create_account_form.dart` | The sign-up form keeps validation, submission and auth error states together; split when the auth form patterns are consolidated. |
+| `app/lib/features/gallery/ui/gallery_screen.dart` | Debug-only gallery composes the full component kit in one route; sections are independently buildable but are not production UI. |
+| `app/lib/features/onboarding/ui/onboarding_screen.dart` | Onboarding steps, progress and completion navigation are coupled to the onboarding state machine. |
+| `app/lib/features/reports/ui/trends_screen.dart` | Trend filters, loading/error states and chart data selection form one screen-level workflow. |
+| `app/lib/features/settings/ui/settings_screen.dart` | Settings groups and their provider-driven actions are composed in one feature screen; extract sections if the settings IA grows. |
+| `app/lib/theme/app_theme.dart` | Both palettes and component themes are assembled from the same token source. |
+| `app/lib/features/reports/ui/report_screen.dart` | Report detail owns its loading/error/data state and its related clinical summary cards. |
+| `app/lib/features/reports/ui/upload_screen.dart` | Upload lifecycle states are coordinated by one idempotent upload flow. |
+| `app/lib/features/home/ui/home_screen.dart` | Home layout composes repository state and feature-gated cards in one screen. |
 
 - Screens read only from repository providers (`lib/data/repositories.dart`).
   Never call `ApiClient` or Supabase from a widget.

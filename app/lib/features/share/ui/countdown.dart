@@ -1,3 +1,5 @@
+/// Sprint 12/13 feature — dormant until
+/// `FeatureFlags.share` / `FeatureFlags.doctorPortal`.
 /// A ticking mm:ss countdown shared by the Share screen and the doctor
 /// portal. Reads [clockProvider] so tests can drive it.
 library;

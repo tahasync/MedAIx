@@ -59,7 +59,9 @@ class LabReport {
     required this.status,
     required this.statusText,
     this.date,
+    this.dateSource = 'upload',
     this.attentionCount = 0,
+    this.valuesRead,
     this.summary = '',
     this.values = const <ReportValue>[],
     this.originalText = '',
@@ -82,11 +84,16 @@ class LabReport {
   final String dateLabel;
   final DateTime? date;
 
+  /// `report` when the paper date was printed on the report, otherwise
+  /// `upload` for the date the app received it.
+  final String dateSource;
+
   /// Overall status and its word: "2 need attention" / "All read values in range" /
   /// "Ready to read".
   final ValueStatus status;
   final String statusText;
   final int attentionCount;
+  final int? valuesRead;
 
   /// "In plain words" paragraph.
   final String summary;
@@ -114,9 +121,11 @@ class LabReport {
     String? title,
     String? dateLabel,
     DateTime? date,
+    String? dateSource,
     ValueStatus? status,
     String? statusText,
     int? attentionCount,
+    int? valuesRead,
     String? summary,
     List<ReportValue>? values,
     String? originalText,
@@ -134,9 +143,11 @@ class LabReport {
       title: title ?? this.title,
       dateLabel: dateLabel ?? this.dateLabel,
       date: date ?? this.date,
+      dateSource: dateSource ?? this.dateSource,
       status: status ?? this.status,
       statusText: statusText ?? this.statusText,
       attentionCount: attentionCount ?? this.attentionCount,
+      valuesRead: valuesRead ?? this.valuesRead,
       summary: summary ?? this.summary,
       values: values ?? this.values,
       originalText: originalText ?? this.originalText,

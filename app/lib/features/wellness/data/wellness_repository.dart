@@ -2,6 +2,22 @@
 library;
 
 class WellnessDay {
+  factory WellnessDay.fromJson(Map<String, dynamic> json) => WellnessDay(
+    waterMl: (json['water_ml'] as num?)?.toInt() ?? 0,
+    waterGoalMl: (json['water_goal_ml'] as num?)?.toInt(),
+    steps: (json['steps'] as num?)?.toInt() ?? 0,
+    stepGoal: (json['step_goal'] as num?)?.toInt() ?? 6000,
+    exerciseLabel: json['exercise_label'] as String?,
+    stepGoalNote: json['step_goal_note'] as String? ?? 'Starting goal.',
+    waterGoalNote:
+        json['water_goal_note'] as String? ?? 'A starting estimate for today.',
+    exerciseMinutes: (json['exercise_minutes'] as num?)?.toInt() ?? 0,
+    dailyTip:
+        json['daily_tip'] as String? ?? 'Small, steady habits can add up.',
+    date: json['date'] as String?,
+    pendingSyncCount: (json['pending_sync_count'] as num?)?.toInt() ?? 0,
+    isOffline: json['is_offline'] as bool? ?? false,
+  );
   const WellnessDay({
     required this.waterMl,
     required this.waterGoalMl,
@@ -110,23 +126,6 @@ class WellnessDay {
     'pending_sync_count': pendingSyncCount,
     'is_offline': isOffline,
   };
-
-  factory WellnessDay.fromJson(Map<String, dynamic> json) => WellnessDay(
-    waterMl: (json['water_ml'] as num?)?.toInt() ?? 0,
-    waterGoalMl: (json['water_goal_ml'] as num?)?.toInt(),
-    steps: (json['steps'] as num?)?.toInt() ?? 0,
-    stepGoal: (json['step_goal'] as num?)?.toInt() ?? 6000,
-    exerciseLabel: json['exercise_label'] as String?,
-    stepGoalNote: json['step_goal_note'] as String? ?? 'Starting goal.',
-    waterGoalNote:
-        json['water_goal_note'] as String? ?? 'A starting estimate for today.',
-    exerciseMinutes: (json['exercise_minutes'] as num?)?.toInt() ?? 0,
-    dailyTip:
-        json['daily_tip'] as String? ?? 'Small, steady habits can add up.',
-    date: json['date'] as String?,
-    pendingSyncCount: (json['pending_sync_count'] as num?)?.toInt() ?? 0,
-    isOffline: json['is_offline'] as bool? ?? false,
-  );
 }
 
 abstract class WellnessRepository {

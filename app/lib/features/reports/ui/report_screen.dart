@@ -10,11 +10,14 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/router.dart';
 import '../../../core/widgets/widgets.dart';
-import '../../../theme/app_theme.dart';
+import '../../../data/api/api_client.dart';
 import '../../../theme/ai_surface.dart';
+import '../../../theme/app_theme.dart';
+import '../../auth/data/session_errors.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../data/report_models.dart';
-import '../data/severity.dart';
 import '../data/reports_repository.dart';
+import '../data/severity.dart';
 import '../providers/reports_providers.dart';
 import '../providers/trends_providers.dart';
 
@@ -46,7 +49,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           title: value?.title ?? 'Report',
           subtitle: value == null
               ? null
-              : '${value.dateLabel} · ${value.title}',
+              : '${value.title} · ${value.dateLabel}',
           showBack: true,
         ),
         children: [
@@ -55,19 +58,43 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               skipLoadingOnRefresh: true,
               loading: () =>
                   const _ReportLoading(key: ValueKey<String>('report-loading')),
-              error: (error, _) => ErrorCard(
-                key: const ValueKey<String>('report-error'),
-                title: 'Couldn’t open this report',
-                message: error is RepositoryException
-                    ? error.message
-                    : 'Could not reach the MedAIx service.',
-                dataSafety: 'Your reports are still saved on your account.',
-                onPrimary: error is RepositoryException && !error.canRetry
-                    ? null
-                    : () => ref.invalidate(reportDetailProvider(widget.id)),
-                secondaryLabel: 'Back to reports',
-                onSecondary: () => context.popOrGo(AppRoutes.reports),
-              ),
+              error: (error, _) => isSessionExpired(error)
+                  ? ErrorState.sessionExpired(
+                      key: const ValueKey<String>('session-expired'),
+                      onPrimary: () => ref
+                          .read(authControllerProvider.notifier)
+                          .expireSession(),
+                    )
+                  : error is ReportUnavailableException
+                  ? ErrorState.reportUnavailable(
+                      key: const ValueKey<String>('report-unavailable'),
+                      onPrimary: () => context.popOrGo(AppRoutes.reports),
+                    )
+                  : error is RepositoryException &&
+                        error.cause is ApiException &&
+                        (error.cause! as ApiException).statusCode != null &&
+                        (error.cause! as ApiException).statusCode! >= 500
+                  ? ErrorState.serverError(
+                      key: const ValueKey<String>('report-server-error'),
+                      onPrimary: () =>
+                          ref.invalidate(reportDetailProvider(widget.id)),
+                      onSecondary: () => showSupportSheet(context),
+                    )
+                  : ErrorCard(
+                      key: const ValueKey<String>('report-error'),
+                      title: 'Couldn’t open this report',
+                      message: error is RepositoryException
+                          ? error.message
+                          : 'Could not reach the MedAIx service.',
+                      dataSafety:
+                          'Your reports are still saved on your account.',
+                      onPrimary: error is RepositoryException && !error.canRetry
+                          ? null
+                          : () =>
+                                ref.invalidate(reportDetailProvider(widget.id)),
+                      secondaryLabel: 'Back to reports',
+                      onSecondary: () => context.popOrGo(AppRoutes.reports),
+                    ),
               data: (r) => _ReportBody(
                 key: const ValueKey<String>('report'),
                 report: r,
@@ -90,10 +117,10 @@ class _ReportLoading extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      AppCard(
+      const AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
+          children: [
             SkeletonBox(height: 16, width: 112),
             SizedBox(height: AppSpace.md),
             SkeletonBox(height: 22, width: 240),
@@ -169,6 +196,10 @@ class _ReportBody extends StatelessWidget {
         .where((line) => !line.trimLeft().startsWith('-'))
         .join('\n')
         .trim();
+    final int valuesRead = report.valuesRead ?? report.values.length;
+    final String dateSource = report.dateSource == 'report'
+        ? 'From the report'
+        : 'From your upload';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -213,6 +244,35 @@ class _ReportBody extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.cardGap),
         ],
+        BentoGrid(
+          children: [
+            BentoTile(
+              key: const ValueKey<String>('report-values-read'),
+              span: 1,
+              child: _ReportSummaryTile(
+                label: 'Values read',
+                value: '$valuesRead',
+              ),
+            ),
+            BentoTile(
+              key: const ValueKey<String>('report-needs-attention'),
+              span: 1,
+              child: _ReportSummaryTile(
+                label: 'Need attention',
+                value: '${report.attentionCount}',
+              ),
+            ),
+            BentoTile(
+              key: const ValueKey<String>('report-date-source'),
+              span: 1,
+              child: _ReportSummaryTile(
+                label: 'Date source',
+                value: dateSource,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.cardGap),
         AiSurface(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,16 +327,41 @@ class _ReportBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpace.cardGap),
         PrimaryButton(
-          label: 'View trend over time',
+          label: 'See how this changes',
           onPressed: () => context.go(
             report.values.isEmpty
                 ? AppRoutes.trends
                 : '${AppRoutes.trends}?marker=${Uri.encodeQueryComponent(_trendMarker)}',
           ),
         ),
+        const SizedBox(height: AppSpace.xl),
+        const AppDisclaimer(),
       ],
     );
   }
+}
+
+class _ReportSummaryTile extends StatelessWidget {
+  const _ReportSummaryTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Text(value, style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: AppSpace.xs),
+      Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
+      ),
+    ],
+  );
 }
 
 /// Mockup value card: bold name + status, h2 value, muted explanation.

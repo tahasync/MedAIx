@@ -11,8 +11,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/auth/providers/auth_providers.dart';
 import '../../features/settings/providers/settings_providers.dart';
 import '../../theme/app_theme.dart';
+import '../widgets/slow_operation_hint.dart';
 
 /// Asset paths registered in `pubspec.yaml`.
 class BrandAssets {
@@ -91,10 +93,7 @@ class SplashScreen extends StatelessWidget {
             children: [
               TweenAnimationBuilder<double>(
                 tween: Tween<double>(begin: 0, end: 1),
-                duration: AppMotion.of(
-                  context,
-                  const Duration(milliseconds: 400),
-                ),
+                duration: AppMotion.of(context, AppMotion.slow),
                 curve: AppMotion.curve,
                 builder: (context, t, child) =>
                     Opacity(opacity: t, child: child),
@@ -123,11 +122,11 @@ class SplashScreen extends StatelessWidget {
 }
 
 /// Shown while Supabase restores the saved account session on startup.
-class AccountLoadingScreen extends StatelessWidget {
+class AccountLoadingScreen extends ConsumerWidget {
   const AccountLoadingScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final TextTheme text = Theme.of(context).textTheme;
     return Scaffold(
@@ -138,39 +137,44 @@ class AccountLoadingScreen extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 440),
             child: Padding(
               padding: const EdgeInsets.all(AppSpace.screen),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 112,
-                    height: 112,
-                    decoration: BoxDecoration(
-                      color: c.surface2,
-                      borderRadius: AppRadius.cardAll,
+              child: SlowOperationHint(
+                pending: true,
+                onRetry: () => ref.invalidate(authBootstrapProvider),
+                body: 'Your saved account data remains on your account.',
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 112,
+                      height: 112,
+                      decoration: BoxDecoration(
+                        color: c.surface2,
+                        borderRadius: AppRadius.cardAll,
+                      ),
+                      alignment: Alignment.center,
+                      child: const BrandMark(size: 68),
                     ),
-                    alignment: Alignment.center,
-                    child: const BrandMark(size: 68),
-                  ),
-                  const SizedBox(height: AppSpace.xl),
-                  const SizedBox(
-                    width: 54,
-                    height: 54,
-                    child: CircularProgressIndicator(strokeWidth: 4),
-                  ),
-                  const SizedBox(height: AppSpace.xl),
-                  Text(
-                    'Setting up your account',
-                    textAlign: TextAlign.center,
-                    style: text.titleLarge,
-                  ),
-                  const SizedBox(height: AppSpace.sm),
-                  Text(
-                    'Fetching your profile and reports. This can take a '
-                    'moment on a slow connection.',
-                    textAlign: TextAlign.center,
-                    style: text.bodyLarge?.copyWith(color: c.muted),
-                  ),
-                ],
+                    const SizedBox(height: AppSpace.xl),
+                    const SizedBox(
+                      width: 54,
+                      height: 54,
+                      child: CircularProgressIndicator(strokeWidth: 4),
+                    ),
+                    const SizedBox(height: AppSpace.xl),
+                    Text(
+                      'Setting up your account',
+                      textAlign: TextAlign.center,
+                      style: text.titleLarge,
+                    ),
+                    const SizedBox(height: AppSpace.sm),
+                    Text(
+                      'Fetching your profile and reports. This can take a '
+                      'moment on a slow connection.',
+                      textAlign: TextAlign.center,
+                      style: text.bodyLarge?.copyWith(color: c.muted),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -186,7 +190,7 @@ class BootSplash extends ConsumerStatefulWidget {
   const BootSplash({
     super.key,
     required this.child,
-    this.minimumDuration = const Duration(milliseconds: 1400),
+    this.minimumDuration = AppMotion.splashMinimum,
   });
 
   final Widget child;
@@ -201,11 +205,22 @@ class _BootSplashState extends ConsumerState<BootSplash> {
   bool _ready = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _timer?.cancel();
+    if (AppMotion.reduced(context)) {
+      _ready = true;
+    } else if (!_ready) {
+      _timer = Timer(widget.minimumDuration, () {
+        if (mounted) setState(() => _ready = true);
+      });
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
-    _timer = Timer(widget.minimumDuration, () {
-      if (mounted) setState(() => _ready = true);
-    });
+    // Scheduled in didChangeDependencies so reduced-motion is respected.
   }
 
   @override
@@ -217,7 +232,7 @@ class _BootSplashState extends ConsumerState<BootSplash> {
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
+      duration: AppMotion.of(context, AppMotion.slow),
       child: _ready
           ? widget.child
           : MaterialApp(

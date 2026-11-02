@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tahasync_medaix/core/legal/legal_constants.dart';
 import 'package:tahasync_medaix/core/widgets/widgets.dart';
 import 'package:tahasync_medaix/data/fake/fake_repositories.dart';
 import 'package:tahasync_medaix/features/auth/ui/sign_in_screen.dart';
@@ -76,6 +77,44 @@ void main() {
         'Frequently asked questions',
         'Troubleshooting',
         'Contact support',
+      ]) {
+        await _reveal(tester, find.text(label));
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+    });
+
+    testWidgets('settings footer has version, links and disclaimer', (
+      tester,
+    ) async {
+      await usePhone(tester);
+      await tester.pumpWidget(testAppAt('/settings'));
+      await tester.pumpAndSettle();
+
+      for (final label in [
+        'MedAIx v0.1.4+5',
+        'Terms',
+        'Privacy',
+        'Support',
+        'MedAIx explains reports; it is not a diagnosis.',
+      ]) {
+        await _reveal(tester, find.text(label));
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+    });
+
+    testWidgets('settings footer has version, links and disclaimer', (
+      tester,
+    ) async {
+      await usePhone(tester);
+      await tester.pumpWidget(testAppAt('/settings'));
+      await tester.pumpAndSettle();
+
+      for (final label in [
+        'MedAIx v0.1.4+5',
+        'Terms',
+        'Privacy',
+        'Support',
+        'MedAIx explains reports; it is not a diagnosis.',
       ]) {
         await _reveal(tester, find.text(label));
         expect(find.text(label), findsOneWidget, reason: label);
@@ -167,9 +206,38 @@ void main() {
 
       await _tapText(tester, 'Troubleshooting');
       expect(find.text('Troubleshooting'), findsNWidgets(2));
-      expect(find.widgetWithText(FilledButton, 'Close'), findsOneWidget);
-      await _tapButton(tester, 'Close');
+      expect(find.widgetWithText(FilledButton, 'Got it'), findsOneWidget);
+      await _tapButton(tester, 'Got it');
       expect(find.text('Troubleshooting'), findsOneWidget);
+    });
+
+    testWidgets('Terms and Privacy open native in-app pages', (tester) async {
+      await usePhone(tester);
+      await tester.pumpWidget(testAppAt('/settings'));
+      await tester.pumpAndSettle();
+
+      await _tapText(tester, 'Terms');
+      expect(find.text('What MedAIx does'), findsOneWidget);
+      expect(find.textContaining('not a diagnosis'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsScreen), findsOneWidget);
+
+      await _tapText(tester, 'Privacy');
+      expect(find.text('Information in MedAIx'), findsOneWidget);
+      expect(find.text('Storage and deletion'), findsOneWidget);
+    });
+
+    testWidgets('Support opens a native screen from Settings', (tester) async {
+      await usePhone(tester);
+      await tester.pumpWidget(testAppAt('/settings'));
+      await tester.pumpAndSettle();
+
+      await _tapText(tester, 'Contact support');
+      expect(find.text('Get help'), findsOneWidget);
+      expect(find.textContaining(kSupportEmail), findsOneWidget);
+      expect(find.textContaining(kSupportResponseTime), findsOneWidget);
     });
   });
 

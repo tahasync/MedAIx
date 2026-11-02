@@ -76,7 +76,7 @@ class AppChip extends StatelessWidget {
             onTap: onTap == null
                 ? null
                 : () {
-                    AppHaptics.select();
+                    playHaptic(context, (haptics) => haptics.select());
                     onTap!();
                   },
             child: ConstrainedBox(

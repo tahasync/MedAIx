@@ -13,6 +13,7 @@
 /// so Back from a sub-route always lands on its tab root.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -20,7 +21,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../features/auth/providers/auth_providers.dart';
 import '../features/auth/ui/sign_in_screen.dart';
-import 'brand/brand.dart';
 import '../features/doctor/ui/doctor_screen.dart';
 import '../features/gallery/ui/gallery_screen.dart';
 import '../features/home/ui/home_screen.dart';
@@ -35,12 +35,14 @@ import '../features/reports/ui/reports_screen.dart';
 import '../features/reports/ui/trends_screen.dart';
 import '../features/reports/ui/upload_screen.dart';
 import '../features/settings/providers/settings_providers.dart';
+import '../features/settings/ui/legal_support_screen.dart';
 import '../features/settings/ui/reminders_screen.dart';
 import '../features/settings/ui/settings_screen.dart';
 import '../features/share/ui/doctor_portal_screen.dart';
 import '../features/share/ui/share_screen.dart';
 import '../features/wellness/ui/wellness_screen.dart';
 import '../theme/app_theme.dart';
+import 'brand/brand.dart';
 import 'features.dart';
 import 'update_checker.dart';
 import 'widgets/widgets.dart';
@@ -68,6 +70,9 @@ abstract final class AppRoutes {
   static const String settings = '/settings';
   static const String profile = '/settings/profile';
   static const String reminders = '/settings/reminders';
+  static const String terms = '/settings/terms';
+  static const String privacy = '/settings/privacy';
+  static const String support = '/settings/support';
   static const String share = '/settings/share';
   static const String doctorPortal = '/settings/doctor-portal';
 }
@@ -105,6 +110,15 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: AppRoutes.home,
     refreshListenable: refresh,
     debugLogDiagnostics: false,
+    errorBuilder: (context, state) => AppScaffold(
+      body: AppScreen(
+        insetForNav: false,
+        header: const ScreenHeader(title: 'MedAIx', showBack: true),
+        children: [
+          ErrorState.notFound(onPrimary: () => context.go(AppRoutes.home)),
+        ],
+      ),
+    ),
     redirect: (context, state) {
       final AsyncValue<void> bootstrap = ref.read(authBootstrapProvider);
       final String location = state.matchedLocation;
@@ -142,10 +156,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.onboarding,
         builder: (context, state) => const OnboardingScreen(),
       ),
-      GoRoute(
-        path: AppRoutes.gallery,
-        builder: (context, state) => const GalleryScreen(),
-      ),
+      ...galleryRoutesForBuild(debugBuild: kDebugMode),
       // Public aliases from the route table in docs/engineering-guide.md §1.
       GoRoute(path: '/upload', redirect: (_, _) => AppRoutes.upload),
       GoRoute(path: '/trends', redirect: (_, _) => AppRoutes.trends),
@@ -250,6 +261,18 @@ final routerProvider = Provider<GoRouter>((ref) {
                     builder: (context, state) => const ProfileScreen(),
                   ),
                   GoRoute(
+                    path: 'terms',
+                    builder: (context, state) => const TermsScreen(),
+                  ),
+                  GoRoute(
+                    path: 'privacy',
+                    builder: (context, state) => const PrivacyScreen(),
+                  ),
+                  GoRoute(
+                    path: 'support',
+                    builder: (context, state) => const SupportScreen(),
+                  ),
+                  GoRoute(
                     path: 'reminders',
                     redirect: (_, _) => gate(features.reminders),
                     builder: (context, state) => const RemindersScreen(),
@@ -275,6 +298,17 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// The component gallery must not be registered in production builds.
+@visibleForTesting
+List<RouteBase> galleryRoutesForBuild({required bool debugBuild}) => debugBuild
+    ? <RouteBase>[
+        GoRoute(
+          path: AppRoutes.gallery,
+          builder: (context, state) => const GalleryScreen(),
+        ),
+      ]
+    : const <RouteBase>[];
 
 class _RouterRefresh extends ChangeNotifier {
   void ping() => notifyListeners();

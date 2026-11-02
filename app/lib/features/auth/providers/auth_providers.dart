@@ -32,6 +32,12 @@ class AuthController extends Notifier<AuthSession?> {
     ref.onDispose(subscription.cancel);
     return gateway.currentSession;
   }
+
+  /// Clears only the auth session. Feature providers keep pending local work.
+  Future<void> expireSession() async {
+    state = null;
+    await ref.read(authGatewayProvider).signOut();
+  }
 }
 
 final authControllerProvider = NotifierProvider<AuthController, AuthSession?>(

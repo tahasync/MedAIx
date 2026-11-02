@@ -5,6 +5,8 @@
 /// keeps the file fallback one tap away.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +16,7 @@ import '../../../core/router.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/ai_surface.dart';
 import '../../../theme/app_theme.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../data/report_models.dart';
 import '../providers/reports_providers.dart';
 import '../providers/upload_providers.dart';
@@ -32,6 +35,7 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
   bool _askingCamera = false;
   bool _requesting = false;
   bool _cameraGranted = false;
+  bool _galleryPermissionDenied = false;
   CameraPermission? _denial;
 
   Future<void> _submit(String path) => ref
@@ -39,7 +43,21 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
       .submit(path, language: _language);
 
   Future<void> _pick(UploadSource source) async {
-    final String? path = await ref.read(filePickerProvider)(source);
+    String? path;
+    try {
+      path = await ref.read(filePickerProvider)(source);
+    } on FilePermissionDenied {
+      if (!mounted) return;
+      setState(() {
+        _askingCamera = true;
+        _galleryPermissionDenied = source == UploadSource.gallery;
+        _denial = const CameraPermission(
+          granted: false,
+          permanentlyDenied: true,
+        );
+      });
+      return;
+    }
     if (!mounted) return;
     if (path == null) {
       if (source == UploadSource.camera) {
@@ -57,7 +75,7 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
 
   Future<void> _allowCamera() async {
     if (_denial?.permanentlyDenied == true) {
-      await openCameraSettings();
+      await openAppSettings();
       return;
     }
     setState(() => _requesting = true);
@@ -80,8 +98,12 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
   }
 
   void _chooseFileInstead() {
-    setState(() => _askingCamera = false);
-    _pick(UploadSource.gallery);
+    setState(() {
+      _askingCamera = false;
+      _denial = null;
+      _galleryPermissionDenied = false;
+    });
+    unawaited(_pick(UploadSource.gallery));
   }
 
   @override
@@ -105,37 +127,74 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
     final (Widget header, Widget body) = switch (state) {
       UploadInProgress(:final phase, :final fileName) => (
         ScreenHeader(title: phase.title, subtitle: phase.label),
-        _ReadingView(
-          key: const ValueKey<String>('reading'),
-          phase: phase,
-          fileName: fileName,
+        SlowOperationHint(
+          pending: true,
+          onRetry: () =>
+              ref.read(uploadControllerProvider.notifier).retryCurrent(),
+          child: _ReadingView(
+            key: const ValueKey<String>('reading'),
+            phase: phase,
+            fileName: fileName,
+          ),
         ),
       ),
-      UploadFailure(:final message, :final canRetry) => (
-        uploadHeader,
-        ErrorCard(
-          key: const ValueKey<String>('failure'),
-          title: 'Couldn’t read this photo',
-          message: message,
-          dataSafety:
-              'Retrying this upload uses the same request id, so it will not '
-              'create a duplicate report. Your other reports are safe.',
-          onPrimary: canRetry
-              ? () => ref.read(uploadControllerProvider.notifier).retry()
-              : null,
-          secondaryLabel: 'Choose another file',
-          onSecondary: () =>
-              ref.read(uploadControllerProvider.notifier).reset(),
+      UploadFailure(
+        :final message,
+        :final canRetry,
+        :final isServerError,
+        :final sessionExpired,
+      ) =>
+        (
+          uploadHeader,
+          sessionExpired
+              ? ErrorState.sessionExpired(
+                  key: const ValueKey<String>('session-expired'),
+                  onPrimary: () =>
+                      ref.read(authControllerProvider.notifier).expireSession(),
+                )
+              : !canRetry
+              ? ErrorState.parseFailed(
+                  key: const ValueKey<String>('parse-failed'),
+                  onPrimary: () {
+                    ref.read(uploadControllerProvider.notifier).reset();
+                    unawaited(_scan());
+                  },
+                  onSecondary: () => unawaited(_pick(UploadSource.gallery)),
+                )
+              : isServerError
+              ? ErrorState.serverError(
+                  key: const ValueKey<String>('server-error'),
+                  onPrimary: () =>
+                      ref.read(uploadControllerProvider.notifier).retry(),
+                  onSecondary: () => showSupportSheet(context),
+                )
+              : ErrorCard(
+                  key: const ValueKey<String>('failure'),
+                  title: 'Couldn’t read this photo',
+                  message: message,
+                  dataSafety:
+                      'Retrying this upload uses the same request id, so it '
+                      'will not create a duplicate report. Your other reports '
+                      'are safe.',
+                  onPrimary: canRetry
+                      ? () =>
+                            ref.read(uploadControllerProvider.notifier).retry()
+                      : null,
+                  secondaryLabel: 'Choose another file',
+                  onSecondary: () =>
+                      ref.read(uploadControllerProvider.notifier).reset(),
+                ),
         ),
-      ),
       UploadIdle() || UploadSuccess() => (
         uploadHeader,
         _askingCamera
             ? _CameraPermissionCard(
                 key: const ValueKey<String>('permission'),
                 denial: _denial,
+                camera: !_galleryPermissionDenied,
                 requesting: _requesting,
                 onAllow: _allowCamera,
+                onOpenSettings: openAppSettings,
                 onChooseFile: _chooseFileInstead,
               )
             : _PickView(
@@ -264,7 +323,7 @@ class _ReadingView extends StatelessWidget {
       children: [
         Row(
           children: [
-            IconTile(icon: LucideIcons.fileText),
+            const IconTile(icon: LucideIcons.fileText),
             const SizedBox(width: AppSpace.md),
             Expanded(
               child: Text(
@@ -278,7 +337,7 @@ class _ReadingView extends StatelessWidget {
         ),
         const SizedBox(height: AppSpace.lg),
         if (phase == UploadPhase.explaining)
-          AiBusyAction(
+          const AiBusyAction(
             busy: true,
             child: PrimaryButton(
               label: 'Explaining report',
@@ -315,29 +374,34 @@ class _CameraPermissionCard extends StatelessWidget {
   const _CameraPermissionCard({
     super.key,
     required this.denial,
+    required this.camera,
     required this.requesting,
     required this.onAllow,
+    required this.onOpenSettings,
     required this.onChooseFile,
   });
 
   final CameraPermission? denial;
+  final bool camera;
   final bool requesting;
   final VoidCallback onAllow;
+  final VoidCallback onOpenSettings;
   final VoidCallback onChooseFile;
 
   @override
   Widget build(BuildContext context) {
+    if (denial != null) {
+      return ErrorState.permissionDenied(
+        camera: camera,
+        onPrimary: onOpenSettings,
+        onSecondary: onChooseFile,
+      );
+    }
     final c = context.colors;
     final TextTheme text = Theme.of(context).textTheme;
-    final bool permanent = denial?.permanentlyDenied == true;
-    final String body = denial == null
-        ? 'We use the camera only to photograph your report so we can read '
-              'the values. MedAIx doesn’t keep the photo on your phone.'
-        : permanent
-        ? 'Camera access is turned off for MedAIx. Turn it on in Settings, '
-              'or choose a photo or PDF you already have.'
-        : 'Camera access was declined. You can allow it now, or choose a '
-              'photo or PDF you already have.';
+    const String body =
+        'We use the camera only to photograph your report so we can read '
+        'the values. MedAIx doesn’t keep the photo on your phone.';
 
     return AppCard(
       child: Column(
@@ -353,7 +417,7 @@ class _CameraPermissionCard extends StatelessWidget {
           Text(body, style: text.bodyMedium?.copyWith(color: c.muted)),
           const SizedBox(height: AppSpace.lg),
           PrimaryButton(
-            label: permanent ? 'Open settings' : 'Allow camera',
+            label: 'Allow camera',
             loading: requesting,
             onPressed: onAllow,
           ),

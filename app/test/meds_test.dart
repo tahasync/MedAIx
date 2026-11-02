@@ -179,6 +179,28 @@ void main() {
   });
 
   group('ScanScreen', () {
+    testWidgets('reduced motion keeps the scan sweep stopped', (tester) async {
+      await usePhone(tester);
+      await tester.pumpWidget(
+        testScreen(
+          Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(disableAnimations: true),
+              child: const ScanScreen(),
+            ),
+          ),
+          overrides: fakeOverrides(
+            meds: FakeMedsRepository(latency: Duration.zero),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Allow camera'));
+      await pumpFrames(tester);
+      expect(find.text('Point at the packet'), findsOneWidget);
+      expect(tester.hasRunningAnimations, isFalse);
+    });
+
     testWidgets('permission card → viewfinder → capture → match', (
       tester,
     ) async {

@@ -6,6 +6,7 @@
 /// never touch a platform channel.
 library;
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart' as fp;
@@ -14,6 +15,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/haptics.dart';
+import '../../../data/api/api_client.dart';
 import '../../../data/repositories.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
@@ -42,6 +45,10 @@ class CameraPermission {
 }
 
 typedef RequestCameraPermission = Future<CameraPermission> Function();
+
+class FilePermissionDenied implements Exception {
+  const FilePermissionDenied();
+}
 
 const MethodChannel _cameraChannel = MethodChannel(
   'com.tahasync.medaix/camera_permission',
@@ -76,7 +83,11 @@ Future<String?> pickReportFile(UploadSource source) async {
         );
         return files.isEmpty ? null : files.first.path;
     }
-  } on PlatformException {
+  } on PlatformException catch (error) {
+    final String code = error.code.toLowerCase();
+    if (code.contains('permission') || code.contains('denied')) {
+      throw const FilePermissionDenied();
+    }
     // No camera / file manager, or the picker was dismissed.
     return null;
   } on MissingPluginException {
@@ -105,7 +116,7 @@ Future<CameraPermission> requestCameraPermission() async {
 }
 
 /// Opens the app's page in system Settings (after "don't ask again").
-Future<void> openCameraSettings() async {
+Future<void> openAppSettings() async {
   try {
     await _cameraChannel.invokeMethod<void>('openAppSettings');
   } on PlatformException {
@@ -168,6 +179,8 @@ class UploadFailure extends UploadState {
     required this.filePath,
     required this.language,
     required this.uploadId,
+    this.isServerError = false,
+    this.sessionExpired = false,
   });
 
   /// User-safe, from [RepositoryException.message].
@@ -176,9 +189,16 @@ class UploadFailure extends UploadState {
   final String filePath;
   final ReportLanguage language;
   final String uploadId;
+  final bool isServerError;
+  final bool sessionExpired;
 }
 
 class UploadController extends Notifier<UploadState> {
+  int _operation = 0;
+  String? _currentPath;
+  ReportLanguage _currentLanguage = ReportLanguage.english;
+  String? _currentUploadId;
+
   @override
   UploadState build() => const UploadIdle();
 
@@ -191,6 +211,10 @@ class UploadController extends Notifier<UploadState> {
     if (state is UploadInProgress) return;
     final String stableUploadId = uploadId ?? _newUploadId();
     final String fileName = _fileName(filePath);
+    _currentPath = filePath;
+    _currentLanguage = language;
+    _currentUploadId = stableUploadId;
+    final int operation = ++_operation;
     state = UploadInProgress(phase: UploadPhase.uploading, fileName: fileName);
     try {
       final LabReport report = await ref
@@ -200,26 +224,37 @@ class UploadController extends Notifier<UploadState> {
             language: language,
             uploadId: stableUploadId,
             onPhase: (phase) {
-              if (state is UploadInProgress) {
+              if (operation == _operation && state is UploadInProgress) {
                 state = UploadInProgress(phase: phase, fileName: fileName);
               }
             },
           );
+      if (operation != _operation) return;
       ref.invalidate(reportsListProvider);
       // A new report changes every trend: rebuilding the repository drops
       // its memoised `/risk-trends` answer and the insight/trend providers
       // that watch it refetch on next read.
       ref.invalidate(insightsRepositoryProvider);
       state = UploadSuccess(report: report);
+      ref.read(appHapticsProvider).success();
     } on RepositoryException catch (error) {
+      if (operation != _operation) return;
       state = UploadFailure(
         message: error.message,
         canRetry: error.canRetry,
         filePath: filePath,
         language: language,
         uploadId: stableUploadId,
+        isServerError:
+            error.cause is ApiException &&
+            ((error.cause! as ApiException).statusCode ?? 0) >= 500,
+        sessionExpired:
+            error.cause is ApiException &&
+            (error.cause! as ApiException).statusCode == 401,
       );
-    } catch (_) {
+      ref.read(appHapticsProvider).error();
+    } on Object catch (_) {
+      if (operation != _operation) return;
       state = UploadFailure(
         message: 'Something went wrong while reading the report.',
         canRetry: true,
@@ -227,6 +262,7 @@ class UploadController extends Notifier<UploadState> {
         language: language,
         uploadId: stableUploadId,
       );
+      ref.read(appHapticsProvider).error();
     }
   }
 
@@ -235,6 +271,18 @@ class UploadController extends Notifier<UploadState> {
     final UploadState s = state;
     if (s is! UploadFailure) return;
     await submit(s.filePath, language: s.language, uploadId: s.uploadId);
+  }
+
+  /// Retries a slow in-flight upload with the same idempotency key. The
+  /// previous response is ignored if it arrives after this retry starts.
+  void retryCurrent() {
+    if (state is! UploadInProgress || _currentPath == null) return;
+    final String filePath = _currentPath!;
+    final ReportLanguage language = _currentLanguage;
+    final String? uploadId = _currentUploadId;
+    ++_operation;
+    state = const UploadIdle(hasUploadedBefore: true);
+    unawaited(submit(filePath, language: language, uploadId: uploadId));
   }
 
   /// Back to the empty state ("Choose another file", after success).

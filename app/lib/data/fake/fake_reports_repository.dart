@@ -36,10 +36,7 @@ class FakeReportsRepository implements ReportsRepository {
     await Future<void>.delayed(latency);
     return _reports.firstWhere(
       (r) => r.id == id,
-      orElse: () => throw const RepositoryException(
-        'That report is no longer available.',
-        canRetry: false,
-      ),
+      orElse: () => throw const ReportUnavailableException(),
     );
   }
 
@@ -97,6 +94,7 @@ class FakeReportsRepository implements ReportsRepository {
       title: 'Blood test',
       dateLabel: '18 Oct 2026',
       date: DateTime(2026, 10, 18),
+      dateSource: 'report',
       status: ValueStatus.warn,
       statusText: '2 need attention',
       attentionCount: 2,
@@ -152,6 +150,7 @@ class FakeReportsRepository implements ReportsRepository {
       title: 'Lipid profile',
       dateLabel: '12 Aug 2026',
       date: DateTime(2026, 8, 12),
+      dateSource: 'report',
       status: ValueStatus.ok,
       statusText: 'All read values in range',
       summary: 'All of your cholesterol values are in the normal range.',
@@ -184,6 +183,7 @@ class FakeReportsRepository implements ReportsRepository {
       title: 'Blood test',
       dateLabel: '2 Jun 2026',
       date: DateTime(2026, 6, 2),
+      dateSource: 'report',
       status: ValueStatus.ok,
       statusText: 'All read values in range',
       summary: 'Everything on this report is within the normal range.',

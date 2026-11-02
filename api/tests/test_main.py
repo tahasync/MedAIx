@@ -12,6 +12,7 @@ import pytest
 from fastapi import Depends, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import Session
 
@@ -104,6 +105,25 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "paths" in response.json()
+
+
+def test_api_docs_are_disabled_for_production() -> None:
+    options = main_module.api_docs_options("production")
+
+    assert options == {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+def test_profile_and_wellness_inputs_use_typed_schemas(client: TestClient) -> None:
+    schemas = client.get("/openapi.json").json()["paths"]
+    profile_body = schemas["/profile"]["put"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    wellness_body = schemas["/wellness/log"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+
+    assert profile_body["$ref"].endswith("/ProfileUpdate")
+    assert wellness_body["$ref"].endswith("/WellnessLogInput")
 
 
 def test_cors_origins_default_empty_and_comma_separated() -> None:
@@ -252,6 +272,28 @@ def test_upload_report_passes_selected_language(
     assert response.json()["language"] == language
 
 
+def test_ocr_unavailable_error_does_not_expose_internal_details(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    internal_detail = "private OCR engine path"
+
+    def unavailable(image: Image.Image, *, language):
+        raise main_module.OcrUnavailableError(internal_detail)
+
+    monkeypatch.setattr(main_module, "extract_text", unavailable)
+    response = client.post(
+        "/upload-report",
+        files={"file": ("report.png", _lab_report_image(), "image/png")},
+    )
+
+    assert response.status_code == 503
+    assert internal_detail not in response.text
+    assert internal_detail not in caplog.text
+    assert "failure_type=OcrUnavailableError" in caplog.text
+
+
 def test_upload_report_retry_with_same_client_id_returns_saved_report(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -344,7 +386,63 @@ def test_urdu_upload_explains_when_language_data_is_missing(
     )
 
     assert response.status_code == 503
-    assert "urd" in response.json()["detail"]
+    assert "temporarily unavailable" in response.json()["detail"]
+
+
+def test_upload_ocr_timeout_returns_gateway_timeout(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*args, **kwargs):
+        raise ocr_module.OcrTimeoutError
+
+    monkeypatch.setattr(main_module, "extract_text", timeout)
+    response = client.post(
+        "/upload-report",
+        files={"file": ("slow.png", _lab_report_image(), "image/png")},
+    )
+
+    assert response.status_code == 504
+    assert "took too long" in response.json()["detail"].lower()
+
+
+def test_tesseract_pass_has_a_timeout_and_maps_timeout_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*args, **kwargs):
+        assert kwargs["timeout"] == ocr_module.OCR_TIMEOUT_SECONDS
+        raise RuntimeError("Tesseract process timeout")
+
+    monkeypatch.setattr(ocr_module.pytesseract, "image_to_data", timeout)
+    with pytest.raises(ocr_module.OcrTimeoutError):
+        ocr_module._read_pass(Image.new("RGB", (1, 1)), "eng", "--psm 4")
+
+
+def test_upload_reads_only_one_byte_past_the_file_limit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_sizes: list[int] = []
+    read = StarletteUploadFile.read
+
+    async def bounded_read(upload, size: int = -1):
+        read_sizes.append(size)
+        return await read(upload, size)
+
+    monkeypatch.setattr(StarletteUploadFile, "read", bounded_read)
+    response = client.post(
+        "/upload-report",
+        files={
+            "file": (
+                "large.png",
+                b"x" * (main_module.MAX_UPLOAD_BYTES + 1),
+                "image/png",
+            )
+        },
+    )
+
+    assert response.status_code == 413
+    assert read_sizes == [main_module.MAX_UPLOAD_BYTES + 1]
 
 
 def test_upload_report_rejects_empty_file(client: TestClient) -> None:

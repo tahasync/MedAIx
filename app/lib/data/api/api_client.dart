@@ -11,6 +11,9 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../../features/profile/data/profile_repository.dart';
+import 'api_models.dart';
+
+export 'api_models.dart';
 
 /// Raised for any non-success response.
 ///
@@ -28,14 +31,52 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
-  ApiClient({required this.baseUrl, http.Client? client, this.accessToken})
-    : _client = client ?? http.Client();
+  ApiClient({
+    required this.baseUrl,
+    http.Client? client,
+    this.accessToken,
+    this.onOfflineChanged,
+    this.onRetryingChanged,
+  }) : _client = client ?? http.Client();
 
   final String baseUrl;
   final http.Client _client;
 
   /// Current Supabase access token, read at request time so a refresh is picked up.
   final String? Function()? accessToken;
+
+  /// Reports logical request outcomes so the shell can show shared status.
+  final void Function(bool offline)? onOfflineChanged;
+  final void Function(bool retrying)? onRetryingChanged;
+
+  void _requestSucceeded() {
+    onOfflineChanged?.call(false);
+    onRetryingChanged?.call(false);
+  }
+
+  void _requestFailed(ApiException error) {
+    onRetryingChanged?.call(false);
+    final message = error.message.toLowerCase();
+    final transportCause =
+        error.error is TimeoutException ||
+        error.error is SocketException ||
+        error.error is http.ClientException ||
+        error.error is HttpException;
+    final transportFailure =
+        error.statusCode == null &&
+        (transportCause ||
+            message.contains('could not reach') ||
+            message.contains('connection was interrupted') ||
+            message.contains('too long to respond') ||
+            message.contains('took too long'));
+    if (transportFailure) onOfflineChanged?.call(true);
+  }
+
+  ApiException _transportError(String message, [Object? cause]) {
+    final error = ApiException(message, error: cause);
+    _requestFailed(error);
+    return error;
+  }
 
   Map<String, String> _authorized(Map<String, String> headers) {
     final token = accessToken?.call();
@@ -115,10 +156,16 @@ class ApiClient {
   Future<bool> checkHealth() async {
     for (var attempt = 1; ; attempt++) {
       try {
-        return await _attemptHealth();
+        final result = await _attemptHealth();
+        _requestSucceeded();
+        return result;
       } on ApiException catch (error) {
         final isLast = attempt >= _healthAttempts;
-        if (isLast || !_isRetryableStatus(error.statusCode)) rethrow;
+        if (isLast || !_isRetryableStatus(error.statusCode)) {
+          _requestFailed(error);
+          rethrow;
+        }
+        onRetryingChanged?.call(true);
         await Future<void>.delayed(_retryDelay);
       }
     }
@@ -190,15 +237,21 @@ class ApiClient {
   }) async {
     for (var attempt = 1; ; attempt++) {
       try {
-        return await _attemptUpload(
+        final result = await _attemptUpload(
           filePath,
           language: language,
           uploadId: uploadId,
           timeout: timeout,
         );
+        _requestSucceeded();
+        return result;
       } on ApiException catch (error) {
         final isLast = attempt >= _uploadAttempts;
-        if (isLast || !_isUploadRetryableStatus(error.statusCode)) rethrow;
+        if (isLast || !_isUploadRetryableStatus(error.statusCode)) {
+          _requestFailed(error);
+          rethrow;
+        }
+        onRetryingChanged?.call(true);
         await Future<void>.delayed(_uploadRetryDelay);
       }
     }
@@ -295,10 +348,16 @@ class ApiClient {
   Future<T> _withRetry<T>(Future<T> Function() attempt) async {
     for (var tries = 1; ; tries++) {
       try {
-        return await attempt();
+        final result = await attempt();
+        _requestSucceeded();
+        return result;
       } on ApiException catch (error) {
         final isLast = tries >= _uploadAttempts;
-        if (isLast || !_isRetryableStatus(error.statusCode)) rethrow;
+        if (isLast || !_isRetryableStatus(error.statusCode)) {
+          _requestFailed(error);
+          rethrow;
+        }
+        onRetryingChanged?.call(true);
         await Future<void>.delayed(_uploadRetryDelay);
       }
     }
@@ -481,7 +540,10 @@ class ApiClient {
       final response = await _client
           .delete(Uri.parse('$baseUrl/profile'), headers: _authorized({}))
           .timeout(timeout);
-      if (response.statusCode >= 200 && response.statusCode < 300) return;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        _requestSucceeded();
+        return;
+      }
       throw ApiException(
         _detailFrom(
           response,
@@ -489,21 +551,19 @@ class ApiClient {
         ),
         statusCode: response.statusCode,
       );
-    } on ApiException {
+    } on ApiException catch (error) {
+      _requestFailed(error);
       rethrow;
     } on TimeoutException {
-      throw ApiException(
+      throw _transportError(
         'Deleting your profile took too long. Please try again.',
       );
     } on SocketException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on http.ClientException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on HttpException catch (error) {
-      throw ApiException(
-        'The connection to MedAIx was interrupted.',
-        error: error,
-      );
+      throw _transportError('The connection to MedAIx was interrupted.', error);
     }
   }
 
@@ -514,27 +574,27 @@ class ApiClient {
     try {
       final response = await send();
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return PatientProfile.fromJson(
+        final profile = PatientProfile.fromJson(
           jsonDecode(response.body) as Map<String, dynamic>,
         );
+        _requestSucceeded();
+        return profile;
       }
       throw ApiException(
         _detailFrom(response, fallback: fallback),
         statusCode: response.statusCode,
       );
-    } on ApiException {
+    } on ApiException catch (error) {
+      _requestFailed(error);
       rethrow;
     } on TimeoutException {
-      throw ApiException(fallback);
+      throw _transportError(fallback);
     } on SocketException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on http.ClientException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on HttpException catch (error) {
-      throw ApiException(
-        'The connection to MedAIx was interrupted.',
-        error: error,
-      );
+      throw _transportError('The connection to MedAIx was interrupted.', error);
     } on FormatException catch (error) {
       throw ApiException(
         'The service returned an unexpected response.',
@@ -641,26 +701,27 @@ class ApiClient {
           .timeout(timeout);
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final Object? body = jsonDecode(response.body);
-        if (body is Map<String, dynamic>) return body;
+        if (body is Map<String, dynamic>) {
+          _requestSucceeded();
+          return body;
+        }
         throw const FormatException('Expected a JSON object.');
       }
       throw ApiException(
         _detailFrom(response, fallback: fallback),
         statusCode: response.statusCode,
       );
-    } on ApiException {
+    } on ApiException catch (error) {
+      _requestFailed(error);
       rethrow;
     } on TimeoutException {
-      throw ApiException(fallback);
+      throw _transportError(fallback);
     } on SocketException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on http.ClientException catch (error) {
-      throw ApiException('Could not reach the MedAIx service.', error: error);
+      throw _transportError('Could not reach the MedAIx service.', error);
     } on HttpException catch (error) {
-      throw ApiException(
-        'The connection to MedAIx was interrupted.',
-        error: error,
-      );
+      throw _transportError('The connection to MedAIx was interrupted.', error);
     } on FormatException catch (error) {
       throw ApiException(
         'The service returned an unexpected response.',
@@ -668,133 +729,4 @@ class ApiClient {
       );
     }
   }
-}
-
-/// Result of a successful `/upload-report` call.
-class OcrUploadResult {
-  const OcrUploadResult({
-    required this.id,
-    required this.text,
-    required this.confidence,
-    required this.skewCorrectedDegrees,
-    required this.language,
-    this.statusCode,
-    this.statusText,
-    this.duplicate = false,
-  });
-
-  factory OcrUploadResult.fromJson(Map<String, dynamic> json) {
-    return OcrUploadResult(
-      id: json['id'] as int,
-      text: json['text'] as String? ?? '',
-      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
-      skewCorrectedDegrees:
-          (json['skew_corrected_degrees'] as num?)?.toDouble() ?? 0,
-      language: json['language'] as String? ?? 'english',
-      statusCode: json['status_code'] as String?,
-      statusText: json['status_text'] as String?,
-      duplicate: json['duplicate'] as bool? ?? false,
-    );
-  }
-
-  final int id;
-  final String text;
-  final double confidence;
-  final double skewCorrectedDegrees;
-  final String language;
-  final String? statusCode;
-  final String? statusText;
-  final bool duplicate;
-
-  /// Below this the server would have rejected the upload, so anything that
-  /// reaches the success state is at or above the floor. Used only to warn
-  /// that a low-but-passing read may be worth re-photographing.
-  bool get isLowConfidence => confidence < 60;
-}
-
-/// Result of a successful `/simplify-report` call.
-class SimplifyResult {
-  const SimplifyResult({
-    required this.id,
-    required this.originalText,
-    required this.simplifiedText,
-    this.termsSimplified,
-    this.sentenceCount,
-    required this.note,
-    this.statusCode,
-    this.statusText,
-  });
-
-  factory SimplifyResult.fromJson(Map<String, dynamic> json) {
-    return SimplifyResult(
-      id: json['id'] as int,
-      originalText: json['original_text'] as String? ?? '',
-      simplifiedText: json['simplified_text'] as String? ?? '',
-      termsSimplified: (json['terms_simplified'] as num?)?.toInt(),
-      sentenceCount: (json['sentence_count'] as num?)?.toInt(),
-      note: json['note'] as String? ?? '',
-      statusCode: json['status_code'] as String?,
-      statusText: json['status_text'] as String?,
-    );
-  }
-
-  final int id;
-  final String originalText;
-  final String simplifiedText;
-  final int? termsSimplified;
-  final int? sentenceCount;
-  final String note;
-  final String? statusCode;
-  final String? statusText;
-}
-
-/// One row from `GET /reports`, used by the report-history screen.
-class ReportSummary {
-  const ReportSummary({
-    required this.id,
-    required this.uploadedAt,
-    required this.confidence,
-    required this.hasSimplified,
-    required this.imagePath,
-    this.title = 'Lab report',
-    this.reportDate,
-    this.attentionCount = 0,
-    this.valuesRead,
-    this.valuesExpected,
-    this.parseNote,
-    this.statusCode,
-    this.statusText,
-  });
-
-  factory ReportSummary.fromJson(Map<String, dynamic> json) {
-    return ReportSummary(
-      id: json['id'] as int,
-      uploadedAt: json['uploaded_at'] as String? ?? '',
-      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
-      hasSimplified: json['has_simplified'] as bool? ?? false,
-      imagePath: json['image_path'] as String? ?? '',
-      title: json['title'] as String? ?? 'Lab report',
-      reportDate: json['report_date'] as String?,
-      attentionCount: (json['attention_count'] as num?)?.toInt() ?? 0,
-      valuesRead: (json['values_read'] as num?)?.toInt(),
-      valuesExpected: (json['values_expected'] as num?)?.toInt(),
-      parseNote: json['parse_note'] as String?,
-      statusCode: json['status_code'] as String?,
-      statusText: json['status_text'] as String?,
-    );
-  }
-
-  final int id;
-  final String uploadedAt;
-  final double confidence;
-  final bool hasSimplified;
-  final String imagePath;
-  final String title;
-  final String? reportDate;
-  final int attentionCount;
-  final int? valuesRead;
-  final int? valuesExpected;
-  final String? parseNote;
-  final String? statusCode;
-  final String? statusText;
 }

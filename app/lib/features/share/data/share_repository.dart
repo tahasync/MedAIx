@@ -1,3 +1,5 @@
+/// Sprint 12/13 feature — dormant until
+/// `FeatureFlags.share` / `FeatureFlags.doctorPortal`.
 /// Time-limited, read-only sharing with a doctor, and the doctor's view.
 library;
 

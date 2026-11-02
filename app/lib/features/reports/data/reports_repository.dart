@@ -22,6 +22,14 @@ class RepositoryException implements Exception {
   String toString() => 'RepositoryException: $message';
 }
 
+/// A report id that is no longer readable for this account.
+class ReportUnavailableException extends RepositoryException {
+  const ReportUnavailableException({this.statusCode})
+    : super('This report is no longer available.', canRetry: false);
+
+  final int? statusCode;
+}
+
 abstract class ReportsRepository {
   /// Newest first. Summary fields only.
   Future<List<LabReport>> listReports();

@@ -264,6 +264,17 @@ def test_report_dates_accept_labelled_two_digit_years_only(text, expected) -> No
     assert extract_report_date(text) == expected
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "RESULT 1696:9:2026 14-Sep-26 21:40",
+        "RESULT\n1696:9:2026\n14-Sep-26 21:40",
+    ],
+)
+def test_report_date_is_read_beneath_result_heading(text: str) -> None:
+    assert extract_report_date(text) == date(2026, 9, 14)
+
+
 def test_panel_title_uses_whole_words_and_prioritizes_urine() -> None:
     assert guess_panel_title("Urine: Bile Salts and Yeast Cells") == "Urine test"
     assert guess_panel_title("Bile salts and Yeast cells") != "Liver function test"
@@ -577,6 +588,19 @@ def test_trend_prefers_verified_report_date_and_sorts_by_it() -> None:
 
     assert [point["date"] for point in points] == ["2026-03-02", "2026-10-20"]
     assert [point["date_source"] for point in points] == ["report", "report"]
+
+
+def test_trend_recovers_report_date_for_legacy_upload() -> None:
+    legacy = _report(
+        1,
+        10,
+        "RESULT 1696:9:2026 14-Sep-26 21:40\nHbA1c 6.1 %",
+    )
+
+    [point] = _trend(build_risk_trends(_user(), [legacy]), "HbA1c")["points"]
+
+    assert point["date"] == "2026-09-14"
+    assert point["date_source"] == "report"
 
 
 def test_unknown_marker_without_range_is_unrated() -> None:

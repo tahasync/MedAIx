@@ -1,6 +1,9 @@
+/// Sprint 9 feature — dormant until `FeatureFlags.meds`.
 /// Medicine check (mockup `meds`): the list, the add sheet, "Check
 /// interactions" and the warning / all-clear cards.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,7 +31,9 @@ class _MedsScreenState extends ConsumerState<MedsScreen> {
     // A request made before this screen existed (deep link into the
     // scanner, then "Type the name instead").
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && ref.read(medsAddSheetRequestProvider)) _openAddSheet();
+      if (mounted && ref.read(medsAddSheetRequestProvider)) {
+        unawaited(_openAddSheet());
+      }
     });
   }
 
@@ -44,6 +49,10 @@ class _MedsScreenState extends ConsumerState<MedsScreen> {
       isScrollControlled: true,
       useRootNavigator: true,
       useSafeArea: true,
+      sheetAnimationStyle: AnimationStyle(
+        duration: AppMotion.of(context, AppMotion.normal),
+        reverseDuration: AppMotion.of(context, AppMotion.normal),
+      ),
       builder: (_) => const _AddMedicineSheet(),
     );
     if (added == true && mounted) showToast(context, 'Medicine added');
@@ -63,7 +72,7 @@ class _MedsScreenState extends ConsumerState<MedsScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen<bool>(medsAddSheetRequestProvider, (_, bool next) {
-      if (next) _openAddSheet();
+      if (next) unawaited(_openAddSheet());
     });
     final AsyncValue<List<Medicine>> meds = ref.watch(medsProvider);
     final AsyncValue<List<InteractionWarning>?> check = ref.watch(

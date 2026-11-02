@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/haptics.dart';
 import '../../../data/repositories.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../home/providers/home_providers.dart';
@@ -35,9 +36,11 @@ class ProfileEditor extends Notifier<AsyncValue<void>> {
       ref.invalidate(profileProvider);
       _invalidateHealthViews();
       state = const AsyncData(null);
+      ref.read(appHapticsProvider).success();
       return saved;
     } on RepositoryException catch (error, stack) {
       state = AsyncError(error, stack);
+      ref.read(appHapticsProvider).error();
       return null;
     }
   }
@@ -51,9 +54,11 @@ class ProfileEditor extends Notifier<AsyncValue<void>> {
       ref.invalidate(profileProvider);
       _invalidateHealthViews(clearReportViews: true);
       state = const AsyncData(null);
+      ref.read(appHapticsProvider).success();
       return true;
     } on RepositoryException catch (error, stack) {
       state = AsyncError(error, stack);
+      ref.read(appHapticsProvider).error();
       return false;
     }
   }

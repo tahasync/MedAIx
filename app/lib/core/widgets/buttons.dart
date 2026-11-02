@@ -46,7 +46,7 @@ class PrimaryButton extends StatelessWidget {
       onPressed: onPressed == null || loading
           ? null
           : () {
-              if (haptic) AppHaptics.primary();
+              if (haptic) playHaptic(context, (haptics) => haptics.tap());
               onPressed!();
             },
     );
@@ -216,7 +216,12 @@ class AppIconButton extends StatelessWidget {
     final c = context.colors;
     return IconButton(
       tooltip: label,
-      onPressed: onPressed,
+      onPressed: onPressed == null
+          ? null
+          : () {
+              playHaptic(context, (haptics) => haptics.tap());
+              onPressed!();
+            },
       icon: Icon(icon, size: AppSize.icon),
       style: IconButton.styleFrom(
         backgroundColor: onCard ? c.surface2 : c.surface,

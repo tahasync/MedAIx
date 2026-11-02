@@ -154,7 +154,7 @@ abstract final class AppTheme {
       materialTapTargetSize: MaterialTapTargetSize.padded,
     );
 
-    final RoundedRectangleBorder pill = const RoundedRectangleBorder(
+    const RoundedRectangleBorder pill = RoundedRectangleBorder(
       borderRadius: AppRadius.buttonAll,
     );
 
@@ -171,11 +171,11 @@ abstract final class AppTheme {
       splashColor: c.text.withValues(alpha: 0.10),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: <TargetPlatform, PageTransitionsBuilder>{
-          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.android: AppPageTransitionsBuilder(),
+          TargetPlatform.iOS: AppPageTransitionsBuilder(),
+          TargetPlatform.macOS: AppPageTransitionsBuilder(),
+          TargetPlatform.windows: AppPageTransitionsBuilder(),
+          TargetPlatform.linux: AppPageTransitionsBuilder(),
         },
       ),
       appBarTheme: AppBarTheme(
@@ -421,7 +421,7 @@ abstract final class AppTheme {
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           side: const WidgetStatePropertyAll(BorderSide.none),
-          shape: WidgetStatePropertyAll(pill),
+          shape: const WidgetStatePropertyAll(pill),
           textStyle: WidgetStatePropertyAll(text.labelMedium),
           backgroundColor: WidgetStateProperty.resolveWith(
             (states) =>
@@ -441,6 +441,28 @@ abstract final class AppTheme {
         ),
       ),
       extensions: <ThemeExtension<dynamic>>[c],
+    );
+  }
+}
+
+class AppPageTransitionsBuilder extends PageTransitionsBuilder {
+  const AppPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (AppMotion.reduced(context)) return child;
+    return const FadeForwardsPageTransitionsBuilder().buildTransitions<T>(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      child,
     );
   }
 }

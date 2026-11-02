@@ -1,3 +1,5 @@
+/// Sprint 9/10 feature — dormant until
+/// `FeatureFlags.meds` / `FeatureFlags.scan`.
 /// Medicines list, interaction check and packet-scanner state. Screens
 /// read these; nothing here touches the API client directly.
 library;

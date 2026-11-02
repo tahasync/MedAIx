@@ -1,3 +1,5 @@
+/// Sprint 12/13 feature — dormant until
+/// `FeatureFlags.share` / `FeatureFlags.doctorPortal`.
 /// Share-with-doctor session state, the duration picker, the doctor's
 /// portal view and the clock the countdowns read (overridable in tests).
 library;

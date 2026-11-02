@@ -1,3 +1,4 @@
+/// Sprint 13 feature — dormant until `FeatureFlags.doctorPortal`.
 /// Doctor portal (mockup `docscan`): what the doctor sees after scanning a
 /// code — read-only access with a countdown, and the shared records.
 library;

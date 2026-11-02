@@ -5,7 +5,6 @@
 /// exactly as returned.
 library;
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,11 +14,14 @@ import '../../../core/features.dart';
 import '../../../core/router.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../theme/app_theme.dart';
+import '../../auth/data/session_errors.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../../home/data/insights_repository.dart';
 import '../data/report_models.dart';
-import '../data/severity.dart';
 import '../data/reports_repository.dart';
+import '../data/severity.dart';
 import '../providers/trends_providers.dart';
+import 'trend_chart.dart';
 
 class TrendsScreen extends ConsumerWidget {
   const TrendsScreen({super.key, this.marker});
@@ -62,17 +64,25 @@ class _TrendsOverview extends ConsumerWidget {
             child: overview.when(
               skipLoadingOnRefresh: true,
               loading: () => const _TrendsLoading(),
-              error: (error, _) => ErrorCard(
-                key: const ValueKey<String>('trends-error'),
-                title: 'Couldn’t load your trends',
-                message: error is RepositoryException
-                    ? error.message
-                    : 'Could not reach the MedAIx service.',
-                dataSafety: 'Your reports are still saved on your account.',
-                onPrimary: () => ref.invalidate(trendOverviewProvider),
-                secondaryLabel: 'Back to reports',
-                onSecondary: () => context.popOrGo(AppRoutes.reports),
-              ),
+              error: (error, _) => isSessionExpired(error)
+                  ? ErrorState.sessionExpired(
+                      key: const ValueKey<String>('session-expired'),
+                      onPrimary: () => ref
+                          .read(authControllerProvider.notifier)
+                          .expireSession(),
+                    )
+                  : ErrorCard(
+                      key: const ValueKey<String>('trends-error'),
+                      title: 'Couldn’t load your trends',
+                      message: error is RepositoryException
+                          ? error.message
+                          : 'Could not reach the MedAIx service.',
+                      dataSafety:
+                          'Your reports are still saved on your account.',
+                      onPrimary: () => ref.invalidate(trendOverviewProvider),
+                      secondaryLabel: 'Back to reports',
+                      onSecondary: () => context.popOrGo(AppRoutes.reports),
+                    ),
               data: (d) => d.needsReports || d.trends.isEmpty
                   ? _NotEnoughReports(
                       key: const ValueKey<String>('trends-empty'),
@@ -84,6 +94,8 @@ class _TrendsOverview extends ConsumerWidget {
                     ),
             ),
           ),
+          const SizedBox(height: AppSpace.xl),
+          const AppDisclaimer(),
         ],
       ),
     );
@@ -112,7 +124,7 @@ class _OverviewBody extends StatelessWidget {
           AiInsightCard(
             title: insight.title,
             body: insight.body,
-            actionLabel: 'See the trend',
+            actionLabel: 'See ${insight.marker} trend',
             onAction: () => context.push(_markerRoute(insight.marker)),
           ),
           const SizedBox(height: AppSpace.cardGap),
@@ -135,14 +147,6 @@ class _OverviewBody extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: AppSpace.cardGap),
-        Text(
-          'Trends compare the values on your reports. They are information, '
-          'not a diagnosis.',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: context.colors.muted),
-        ),
       ],
     );
   }
@@ -150,7 +154,7 @@ class _OverviewBody extends StatelessWidget {
   ListRow _markerRow(BuildContext context, MarkerTrend t) {
     final String latest = t.series.points.isEmpty
         ? ''
-        : '${_fmt(t.series.points.last.value)} ${t.unit}'.trim();
+        : '${formatTrendValue(t.series.points.last.value)} ${t.unit}'.trim();
     final String count = t.pointCount == 1
         ? '1 report'
         : '${t.pointCount} reports';
@@ -183,9 +187,6 @@ class _OverviewBody extends StatelessWidget {
 String _markerRoute(String marker) =>
     '${AppRoutes.trends}?marker=${Uri.encodeQueryComponent(marker)}';
 
-String _fmt(double v) =>
-    v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
-
 class _NotEnoughReports extends StatelessWidget {
   const _NotEnoughReports({super.key, required this.reportsCount});
 
@@ -202,7 +203,7 @@ class _NotEnoughReports extends StatelessWidget {
           : 'Upload two or more reports with the same values to see how '
                 'they change.',
       action: PrimaryButton(
-        label: 'Upload report',
+        label: 'Add a report',
         icon: LucideIcons.upload,
         onPressed: () => context.go(AppRoutes.upload),
       ),
@@ -221,14 +222,18 @@ class _MarkerTrendScreen extends ConsumerWidget {
     final AsyncValue<TrendSeries?> series = ref.watch(
       trendSeriesProvider(marker),
     );
+    final TrendSeries? value = series.valueOrNull;
+    final int reportCount = value?.points.length ?? 0;
 
     return AppScaffold(
       body: AppScreen(
         header: ScreenHeader(
-          title: series.valueOrNull?.marker == null
+          title: value == null || value.marker.isEmpty
               ? 'Trend details'
-              : '${series.valueOrNull!.marker} trend',
-          subtitle: series.valueOrNull?.rangeLabel,
+              : '${value.marker} trend',
+          subtitle: value == null
+              ? null
+              : 'From $reportCount ${reportCount == 1 ? 'report' : 'reports'}',
           showBack: true,
         ),
         children: [
@@ -236,17 +241,26 @@ class _MarkerTrendScreen extends ConsumerWidget {
             child: series.when(
               skipLoadingOnRefresh: true,
               loading: () => const _TrendLoading(),
-              error: (error, _) => ErrorCard(
-                key: const ValueKey<String>('trend-error'),
-                title: 'Couldn’t load this trend',
-                message: error is RepositoryException
-                    ? error.message
-                    : 'Could not reach the MedAIx service.',
-                dataSafety: 'Your reports are still saved on your account.',
-                onPrimary: () => ref.invalidate(trendSeriesProvider(marker)),
-                secondaryLabel: 'Back to reports',
-                onSecondary: () => context.popOrGo(AppRoutes.reports),
-              ),
+              error: (error, _) => isSessionExpired(error)
+                  ? ErrorState.sessionExpired(
+                      key: const ValueKey<String>('session-expired'),
+                      onPrimary: () => ref
+                          .read(authControllerProvider.notifier)
+                          .expireSession(),
+                    )
+                  : ErrorCard(
+                      key: const ValueKey<String>('trend-error'),
+                      title: 'Couldn’t load this trend',
+                      message: error is RepositoryException
+                          ? error.message
+                          : 'Could not reach the MedAIx service.',
+                      dataSafety:
+                          'Your reports are still saved on your account.',
+                      onPrimary: () =>
+                          ref.invalidate(trendSeriesProvider(marker)),
+                      secondaryLabel: 'Back to reports',
+                      onSecondary: () => context.popOrGo(AppRoutes.reports),
+                    ),
               data: (s) => s == null || s.points.isEmpty
                   ? EmptyState(
                       key: const ValueKey<String>('trend-empty'),
@@ -256,7 +270,7 @@ class _MarkerTrendScreen extends ConsumerWidget {
                           'Upload two or more reports with the same value to '
                           'see how it changes.',
                       action: PrimaryButton(
-                        label: 'Upload report',
+                        label: 'Add a report',
                         icon: LucideIcons.upload,
                         onPressed: () => context.go(AppRoutes.upload),
                       ),
@@ -264,6 +278,8 @@ class _MarkerTrendScreen extends ConsumerWidget {
                   : _TrendBody(key: const ValueKey<String>('trend'), series: s),
             ),
           ),
+          const SizedBox(height: AppSpace.xl),
+          const AppDisclaimer(),
         ],
       ),
     );
@@ -311,13 +327,13 @@ class _TrendBody extends StatelessWidget {
                 image: true,
                 child: ExcludeSemantics(
                   child: SizedBox(
-                    height: _chartHeight,
-                    child: _TrendChart(series: series),
+                    height: trendChartHeight,
+                    child: TrendChart(series: series),
                   ),
                 ),
               ),
               const SizedBox(height: AppSpace.md),
-              _PointLabels(series: series),
+              PointLabels(series: series),
             ],
           ),
         ),
@@ -355,252 +371,14 @@ class _TrendBody extends StatelessWidget {
   }
 }
 
-/// Mockup `spark()` at 300 × 90; a touch taller so the 5 px dots clear.
-const double _chartHeight = 110;
-
-/// Primary line and dots over a shaded reference range.
-class _TrendChart extends StatelessWidget {
-  const _TrendChart({required this.series});
-
-  final TrendSeries series;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final List<TrendPoint> points = series.points;
-    final List<double> ys = <double>[...points.map((p) => p.value)];
-    if (series.low case final double low) ys.add(low);
-    if (series.high case final double high) ys.add(high);
-    double minY = ys.reduce((a, b) => a < b ? a : b);
-    double maxY = ys.reduce((a, b) => a > b ? a : b);
-    final double pad = (maxY - minY) == 0 ? 1 : (maxY - minY) * 0.25;
-    minY -= pad;
-    maxY += pad;
-    final List<double> xs = points.map(_dayNumber).toList();
-    final bool sameDay = xs.first == xs.last;
-    final double minX = sameDay ? xs.first - 1 : xs.first;
-    final double maxX = sameDay ? xs.last + 1 : xs.last;
-
-    return LineChart(
-      duration: AppMotion.of(context, AppMotion.slow),
-      curve: AppMotion.curve,
-      LineChartData(
-        minX: minX,
-        maxX: maxX,
-        minY: minY,
-        maxY: maxY,
-        clipData: const FlClipData.none(),
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          show: true,
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 42,
-              interval: maxY - minY,
-              getTitlesWidget: (value, meta) => Text(
-                _fmt(value),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.muted),
-              ),
-            ),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 28,
-              // Date-valued x coordinates can span months or years. Asking
-              // fl_chart for its default interval creates many synthetic day
-              // ticks; show only the real endpoints and list every exact
-              // report date below the plot instead.
-              interval: maxX - minX,
-              getTitlesWidget: (value, meta) {
-                final double edgeTolerance = (maxX - minX) / 10;
-                final bool atStart = (value - minX).abs() <= edgeTolerance;
-                final bool atEnd = (value - maxX).abs() <= edgeTolerance;
-                if (!atStart && !atEnd) return const SizedBox.shrink();
-                if (sameDay && atEnd) return const SizedBox.shrink();
-                final DateTime date = atStart
-                    ? points.first.date
-                    : points.last.date;
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    _axisDate(date),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: c.muted),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        lineTouchData: LineTouchData(
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipItems: (spots) => spots.map((spot) {
-              final int index = spot.spotIndex;
-              final TrendPoint point = points[index];
-              final String source = switch (point.dateSource) {
-                'report' => 'Report date',
-                'sample' => 'Sample date',
-                _ => 'Upload date',
-              };
-              return LineTooltipItem(
-                '$source\n${_fullDate(point.date)}\n'
-                        '${_fmt(point.value)} ${series.unit}'
-                    .trim(),
-                TextStyle(color: c.text, fontWeight: FontWeight.w600),
-              );
-            }).toList(),
-          ),
-        ),
-        rangeAnnotations: RangeAnnotations(
-          horizontalRangeAnnotations: series.low != null && series.high != null
-              ? <HorizontalRangeAnnotation>[
-                  HorizontalRangeAnnotation(
-                    y1: series.low!,
-                    y2: series.high!,
-                    color: c.ok.withValues(alpha: 0.12),
-                  ),
-                ]
-              : const <HorizontalRangeAnnotation>[],
-        ),
-        lineBarsData: <LineChartBarData>[
-          LineChartBarData(
-            spots: <FlSpot>[
-              for (int i = 0; i < points.length; i++)
-                FlSpot(xs[i], points[i].value),
-            ],
-            color: c.primary,
-            barWidth: 3,
-            isStrokeCapRound: true,
-            isStrokeJoinRound: true,
-            dotData: FlDotData(
-              getDotPainter: (spot, percent, bar, index) =>
-                  FlDotCirclePainter(radius: 5, color: c.primary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Exact dates and the date source for each plotted result.
-class _PointLabels extends StatelessWidget {
-  const _PointLabels({required this.series});
-
-  final TrendSeries series;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final TextStyle? style = Theme.of(context).textTheme.bodySmall;
-    final List<TrendPoint> points = series.points;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Dates use the report date when available; otherwise the upload date.',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: c.muted),
-        ),
-        if (series.unitCorrected)
-          Text(
-            'Unit corrected from the scan',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: c.muted),
-          ),
-        const SizedBox(height: AppSpace.sm),
-        for (final TrendPoint point in points)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      LucideIcons.calendarDays,
-                      size: AppSize.iconSmall,
-                      color: c.muted,
-                    ),
-                    const SizedBox(width: AppSpace.sm),
-                    Expanded(
-                      child: Text(
-                        '${_readableDate(point.date)} · ${_fmt(point.value)} ${series.unit}'
-                            .trim(),
-                        style: style,
-                      ),
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(
-                    start: AppSize.iconSmall + AppSpace.sm,
-                    top: AppSpace.xs,
-                  ),
-                  child: StatusLabel(
-                    status: severityStatus(point.severity),
-                    text: severityLabel(point.severity),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-String _readableDate(DateTime date) =>
-    '${date.day} ${_monthAbbreviation(date.month)} ${date.year}';
-
-double _dayNumber(TrendPoint point) =>
-    point.date.millisecondsSinceEpoch / Duration.millisecondsPerDay;
-
-String _fullDate(DateTime date) =>
-    '${date.year.toString().padLeft(4, '0')}-'
-    '${date.month.toString().padLeft(2, '0')}-'
-    '${date.day.toString().padLeft(2, '0')}';
-
-String _axisDate(DateTime date) =>
-    '${_monthAbbreviation(date.month)} ${date.day}';
-
-String _monthAbbreviation(int month) => const <String>[
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-][month - 1];
-
 class _TrendsLoading extends StatelessWidget {
   const _TrendsLoading();
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: const ValueKey<String>('trends-loading'),
+  Widget build(BuildContext context) => const Column(
+    key: ValueKey<String>('trends-loading'),
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: const [
+    children: [
       SkeletonCard(height: 84),
       SizedBox(height: AppSpace.cardGap),
       SkeletonCard(height: 136),
@@ -614,10 +392,10 @@ class _TrendLoading extends StatelessWidget {
   const _TrendLoading();
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: const ValueKey<String>('trend-loading'),
+  Widget build(BuildContext context) => const Column(
+    key: ValueKey<String>('trend-loading'),
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: const [
+    children: [
       SkeletonCard(height: 176),
       SizedBox(height: AppSpace.cardGap),
       SkeletonCard(height: 84),

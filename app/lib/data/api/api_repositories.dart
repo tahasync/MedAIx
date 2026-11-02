@@ -23,12 +23,14 @@ class ApiReportsRepository implements ReportsRepository {
   /// Upload dates by id, filled by [listReports] so [getReport] can label a
   /// report without a second round-trip when the list was seen first.
   final Map<int, String> _dates = <int, String>{};
+  final Map<int, String> _dateSources = <int, String>{};
   final Map<int, String> _titles = <int, String>{};
   final Map<int, String> _parseNotes = <int, String>{};
 
   @override
   Future<void> clearHealthData() async {
     _dates.clear();
+    _dateSources.clear();
     _titles.clear();
     _parseNotes.clear();
   }
@@ -39,6 +41,7 @@ class ApiReportsRepository implements ReportsRepository {
     return rows.map((row) {
       final String date = formatReportDate(row.reportDate ?? row.uploadedAt);
       _dates[row.id] = date;
+      _dateSources[row.id] = row.reportDate == null ? 'upload' : 'report';
       _titles[row.id] = row.title;
       if (row.parseNote != null) _parseNotes[row.id] = row.parseNote!;
       final int attention = row.attentionCount;
@@ -55,9 +58,11 @@ class ApiReportsRepository implements ReportsRepository {
         title: row.title,
         dateLabel: date,
         date: DateTime.tryParse(row.reportDate ?? row.uploadedAt),
+        dateSource: _dateSources[row.id]!,
         status: status,
         statusText: statusText,
         attentionCount: attention,
+        valuesRead: row.valuesRead,
         confidence: row.confidence,
         hasSimplified: row.hasSimplified,
         parseNote: row.parseNote,
@@ -81,6 +86,7 @@ class ApiReportsRepository implements ReportsRepository {
     );
     onPhase?.call(UploadPhase.explaining);
     _dates[ocr.id] = 'Today';
+    _dateSources[ocr.id] = 'upload';
     late final SimplifyResult simplified;
     try {
       simplified = await _api.simplifyReport(ocr.id);
@@ -136,6 +142,8 @@ class ApiReportsRepository implements ReportsRepository {
       status: status,
       statusText: statusText,
       attentionCount: attention,
+      valuesRead: values.length,
+      dateSource: 'upload',
       values: values,
       originalText: result.text,
       confidence: result.confidence,
@@ -147,26 +155,42 @@ class ApiReportsRepository implements ReportsRepository {
   }
 
   @override
-  Future<LabReport> getReport(int id) => _guard(() async {
-    // `/simplify-report` is idempotent: a second call returns the stored
-    // text, so it doubles as "fetch detail".
-    final SimplifyResult simplified = await _api.simplifyReport(id);
-    String? date = _dates[id];
+  Future<LabReport> getReport(int id) async {
     try {
-      // Refresh parse coverage too: the deterministic OCR parser may have
-      // improved since this report was uploaded, while the in-memory list
-      // cache still holds the older counts.
-      await listReports();
-      date = _dates[id] ?? date;
-    } on RepositoryException {
-      // The detail is still useful without refreshed list metadata.
+      return await _guard(() async {
+        // `/simplify-report` is idempotent: a second call returns the stored
+        // text, so it doubles as "fetch detail".
+        final SimplifyResult simplified = await _api.simplifyReport(id);
+        String? date = _dates[id];
+        try {
+          // Refresh parse coverage too: the deterministic OCR parser may have
+          // improved since this report was uploaded, while the in-memory list
+          // cache still holds the older counts.
+          await listReports();
+          date = _dates[id] ?? date;
+        } on RepositoryException {
+          // The detail is still useful without refreshed list metadata.
+        }
+        return _detail(
+          simplified,
+          dateLabel: date ?? 'Report $id',
+          dateSource: _dateSources[id] ?? 'upload',
+        );
+      });
+    } on RepositoryException catch (error) {
+      final Object? cause = error.cause;
+      if (cause is ApiException &&
+          (cause.statusCode == 403 || cause.statusCode == 404)) {
+        throw ReportUnavailableException(statusCode: cause.statusCode);
+      }
+      rethrow;
     }
-    return _detail(simplified, dateLabel: date ?? 'Report $id');
-  });
+  }
 
   LabReport _detail(
     SimplifyResult r, {
     required String dateLabel,
+    String dateSource = 'upload',
     DateTime? date,
     double? confidence,
     ReportLanguage language = ReportLanguage.english,
@@ -189,10 +213,12 @@ class ApiReportsRepository implements ReportsRepository {
       id: r.id,
       title: _titles[r.id] ?? guessReportTitle(r.originalText),
       dateLabel: dateLabel,
+      dateSource: dateSource,
       date: date,
       status: status,
       statusText: statusText,
       attentionCount: attention,
+      valuesRead: values.length,
       summary: leadSentences(r.simplifiedText),
       values: values,
       originalText: r.originalText,

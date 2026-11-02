@@ -14,8 +14,20 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader
 from sqlalchemy import func
@@ -55,7 +67,7 @@ from models import (  # noqa: F401
     WellnessLog,
     utc_now,
 )
-from ocr import OcrLanguage, OcrResult, OcrUnavailableError, extract_text
+from ocr import OcrLanguage, OcrResult, OcrTimeoutError, OcrUnavailableError, extract_text
 from profile import (
     ProfileUpdate,
     apply_profile_update,
@@ -119,11 +131,41 @@ def ensure_stamped(report: Report, user: User, db: Session) -> bool:
     db.add(report)
     return True
 
+def api_docs_options(environment: str) -> dict[str, str | None]:
+    """Keep interactive API schemas out of production deployments."""
+    if environment.strip().lower() == "production":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
 app = FastAPI(
     title="MedAIx API",
     version="0.1.0",
     description="Clinical decision-support API for MedAIx.",
+    **api_docs_options(os.getenv("ENV", "")),
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    """Keep endpoint validation errors plain and avoid echoing submitted data."""
+    if request.method == "PUT" and request.url.path == "/profile":
+        try:
+            ProfileUpdate.model_validate(exc.body)
+        except ValidationError as error:
+            detail = profile_error_message(error)
+        else:
+            detail = "Check the profile details and try again."
+        return JSONResponse(status_code=422, content={"detail": detail})
+    if request.method == "POST" and request.url.path == "/wellness/log":
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Check the habit entry and try again."},
+        )
+    return await request_validation_exception_handler(request, exc)
 
 def parse_cors_origins(value: str | None = None) -> list[str]:
     return [origin.strip() for origin in (value or "").split(",") if origin.strip()]
@@ -191,7 +233,7 @@ def _first_page_image(payload: bytes) -> Image.Image:
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 - never leak parser internals
-            logger.warning("PDF decode failed: %s", exc)
+            logger.warning("PDF decode failed; parser_error=%s", type(exc).__name__)
             raise HTTPException(
                 status_code=422,
                 detail="That PDF could not be read. "
@@ -264,7 +306,7 @@ async def upload_report(
                 "duplicate": False,
             }
 
-    payload = await file.read()
+    payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if not payload:
         raise HTTPException(
             status_code=422,
@@ -281,12 +323,17 @@ async def upload_report(
 
     try:
         result: OcrResult = extract_text(image, language=language)
+    except OcrTimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Report scanning took too long. Try a smaller or clearer file.",
+        ) from exc
     except OcrUnavailableError as exc:
         # 503, not 500: the request was fine, the server is not ready.
-        logger.error("OCR unavailable: %s", exc)
+        logger.error("OCR unavailable; failure_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
-            detail=f"Report scanning is temporarily unavailable: {exc} "
+            detail="Report scanning is temporarily unavailable. "
             "Your file has not been lost.",
         ) from exc
 
@@ -596,23 +643,15 @@ def read_profile(user: CurrentUser) -> dict[str, object]:
 def update_profile(
     user: CurrentUser,
     db: DbSession,
-    payload: dict[str, object],
+    payload: ProfileUpdate,
 ) -> dict[str, object]:
     """Save the questionnaire answers that were sent; other fields are kept.
 
     Every key is optional, so the three onboarding screens can each save as
     the user finishes them. A failed validation stores nothing.
     """
-    try:
-        update = ProfileUpdate.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=profile_error_message(exc),
-        ) from exc
-
     # ``user`` is attached to this request's session, so write to it directly.
-    apply_profile_update(user, update)
+    apply_profile_update(user, payload)
     db.commit()
     return profile_payload(user)
 
@@ -802,23 +841,15 @@ def read_wellness_log(
 
 @app.post("/wellness/log")
 def create_wellness_log(
-    payload: dict[str, object],
+    payload: WellnessLogInput,
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, object]:
     """Save one water, step or exercise entry and return refreshed daily totals."""
-    try:
-        entry = WellnessLogInput.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail="Check the habit entry and try again.",
-        ) from exc
-
     now = utc_now()
     happened = (
-        entry.occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
-        if entry.occurred_at is not None
+        payload.occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if payload.occurred_at is not None
         else now
     )
     if happened > now + timedelta(minutes=5) or happened < now - timedelta(days=90):
@@ -831,7 +862,7 @@ def create_wellness_log(
         db.query(WellnessLog)
         .filter(
             WellnessLog.user_id == user.id,
-            WellnessLog.client_id == entry.client_id,
+            WellnessLog.client_id == payload.client_id,
         )
         .one_or_none()
     )
@@ -839,31 +870,31 @@ def create_wellness_log(
         water_goal, _, step_goal, _ = _wellness_goals(user)
         target = (
             water_goal
-            if entry.type == "water"
+            if payload.type == "water"
             else step_goal
-            if entry.type == "steps"
+            if payload.type == "steps"
             else None
         )
         log = WellnessLog(
             user_id=user.id,
-            log_type=entry.type,
-            value=entry.value,
+            log_type=payload.type,
+            value=payload.value,
             target=target,
-            label=entry.label,
-            client_id=entry.client_id,
+            label=payload.label,
+            client_id=payload.client_id,
             logged_at=happened,
         )
         db.add(log)
         db.commit()
 
     local_day = (
-        happened + timedelta(minutes=entry.timezone_offset_minutes)
+        happened + timedelta(minutes=payload.timezone_offset_minutes)
     ).date()
     return _wellness_day(
         db,
         user,
         day=local_day,
-        timezone_offset_minutes=entry.timezone_offset_minutes,
+        timezone_offset_minutes=payload.timezone_offset_minutes,
     )
 
 

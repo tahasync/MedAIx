@@ -99,7 +99,7 @@ class ApiWellnessRepository implements WellnessRepository {
       if (error.statusCode != null && error.statusCode! < 500) rethrow;
       final WellnessDay cached =
           await _localStore.readDay(userId, date) ?? _emptyDay(date);
-      return await _withPending(cached, date, isOffline: true);
+      return _withPending(cached, date, isOffline: true);
     }
   }
 

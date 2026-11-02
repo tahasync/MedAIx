@@ -1,3 +1,4 @@
+/// Sprint 11 feature — dormant until `FeatureFlags.doctorMatch`.
 /// Find a doctor (mockup `doctor`): pick one symptom, see which specialist
 /// fits and why, then share records.
 library;

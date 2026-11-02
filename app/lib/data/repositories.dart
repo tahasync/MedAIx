@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/widgets/app_banner.dart';
 import '../features/auth/data/auth_gateway.dart';
 import '../features/auth/providers/auth_providers.dart';
 import '../features/doctor/data/doctor_repository.dart';
@@ -19,8 +20,8 @@ import '../features/profile/data/profile_repository.dart';
 import '../features/reports/data/reports_repository.dart';
 import '../features/settings/data/settings_repository.dart';
 import '../features/share/data/share_repository.dart';
-import '../features/wellness/data/wellness_repository.dart';
 import '../features/wellness/data/api_wellness_repository.dart';
+import '../features/wellness/data/wellness_repository.dart';
 import 'api/api_client.dart';
 import 'api/api_insights_repository.dart';
 import 'api/api_repositories.dart';
@@ -42,6 +43,10 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
     baseUrl: kApiBaseUrl,
     accessToken: () => ref.read(authControllerProvider)?.accessToken,
+    onOfflineChanged: (offline) =>
+        ref.read(appBannerProvider.notifier).setRequestOffline(offline),
+    onRetryingChanged: (retrying) =>
+        ref.read(appBannerProvider.notifier).setRetrying(retrying),
   );
   ref.onDispose(client.dispose);
   return client;

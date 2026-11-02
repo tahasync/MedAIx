@@ -70,9 +70,39 @@ at 200 % text scale and 320 dp width.
 
 ## 5. Motion (`AppMotion`)
 
-fast 150 ms · normal 200 ms · slow 250 ms, `Curves.easeOut`; skeleton shimmer
-1300 ms; toast 1800 ms. `AppMotion.of(context, d)` returns zero when the
-platform asks for reduced motion.
+| Motion token | Use | Reduced motion |
+| --- | --- | --- |
+| fast 150 ms | Press feedback, banners | Zero duration |
+| normal 200 ms | Switches, navigation, sheets, scan | Zero duration; scan pauses |
+| slow 250 ms | State changes, score ring, progress | Zero duration |
+| shimmer 1300 ms | Loading skeleton gradient | Static surface; ticker stops |
+| scanSweep 2 s | Camera scan guide | Sweep stops |
+| splashMinimum 1400 ms | Brand boot screen minimum | Delay skipped |
+| toast 1800 ms | Message visibility | Not an animation |
+
+All easing uses `AppMotion.curve` (`easeOut`). `AppMotion.of(context, d)` returns
+zero when reduced motion is requested. Page transitions skip and sheets use the
+normal token. `AppScreen` owns one lifecycle-aware shimmer ticker, shared by its
+skeletons; each skeleton is isolated in a repaint boundary. Repeating motion
+pauses when the app is backgrounded or its route is ticker-disabled.
+
+`AppHaptics` is provided through Riverpod, defaults on, and can be disabled in
+Settings → Haptic feedback. The device-local setting is loaded at app startup;
+cues are rate limited to one every 60 ms.
+
+| User event | Cue | Where it fires |
+| --- | --- | --- |
+| Primary button press | `tap` (light) | `PrimaryButton` |
+| Tab, chip, segmented/list-row selection | `select` | Shared selection widgets |
+| Switch change | `toggle` (selection click) | `AppSwitch` |
+| Pull-to-refresh trigger | `refresh` (light) | `AppScreen` |
+| Report uploaded, profile saved, wellness entry logged | `success` (medium) | Feature controller/result |
+| Delete/sign-out confirmation | `confirm` (medium) | Confirm button in sheet |
+| Upload/profile save/wellness log failure | `error` (heavy) | One per surfaced failure |
+| Offline banner, abnormal health value, scrolling, timer, loading | None | Passive state |
+
+No `VIBRATE` permission is declared; Android system feedback behavior still
+needs confirmation on a physical device.
 
 ## 6. Component kit (`app/lib/core/widgets/widgets.dart`)
 
